@@ -259,6 +259,7 @@ export const BackendService = {
         docPagoReceber: getColIdx(['doc.pago - receber', 'doc.pago receber', 'pago - receber', 'status receber', 'recebido?'], 35), 
         cpfCnpj: getColIdx(['cpf / cnpj', 'cpf/cnpj', 'cpf', 'cnpj'], 38), // Busca por nome ou fallback para Coluna AM (38)
         observacaoAPagar: getColIdx(['observação - a pagar', 'observacao - a pagar', 'observação a pagar', 'observacao a pagar'], 17), // Coluna R (17)
+        nCliente: getColIdx(['n.cliente', 'n. cliente', 'numero cliente', 'número cliente', 'num cliente'], 24), // Coluna Y (24)
         submissionId: 39,
       };
 
@@ -421,6 +422,7 @@ export const BackendService = {
           totalCobranca: parseCurrency(rawTotalCobranca),
           cpfCnpj: cleanString(get(COL.cpfCnpj)), // Captura CPF/CNPJ da planilha
           observacaoAPagar: cleanString(get(COL.observacaoAPagar)), // Captura Observação - A Pagar da planilha
+          clientNumber: parseInt(get(COL.nCliente)) || undefined, // N.Cliente — Coluna Y
         } as Transaction;
       });
 

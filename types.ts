@@ -33,6 +33,7 @@ export interface Transaction {
   paymentMethod?: string;
   cpfCnpj?: string; // Novo campo vindo do Jotform/Planilha
   observacaoAPagar?: string; // Coluna R da Planilha
+  clientNumber?: number; // N.Cliente — Coluna Y da Planilha (índice 24)
   isExcluded?: boolean; // Marcação de exclusão lógica
 }
 

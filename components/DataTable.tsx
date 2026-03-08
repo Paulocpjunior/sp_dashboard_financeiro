@@ -20,7 +20,7 @@ interface DataTableProps {
   onClientClick?: (clientName: string) => void;
 }
 
-type SortField = 'client' | 'dueDate' | 'receiptDate' | 'cpfCnpj' | 'none';
+type SortField = 'client' | 'clientNumber' | 'dueDate' | 'receiptDate' | 'cpfCnpj' | 'none';
 type SortDirection = 'asc' | 'desc';
 
 // --- VALIDAÇÕES E MÁSCARAS ---
@@ -583,6 +583,9 @@ const DataTable: React.FC<DataTableProps> = ({
           const clientB = (b.client || '').toLowerCase();
           comparison = clientA.localeCompare(clientB, 'pt-BR');
           break;
+        case 'clientNumber':
+          comparison = (a.clientNumber || 0) - (b.clientNumber || 0);
+          break;
         case 'dueDate':
           const dateA = new Date(a.dueDate || '1970-01-01').getTime();
           const dateB = new Date(b.dueDate || '1970-01-01').getTime();
@@ -803,7 +806,7 @@ const DataTable: React.FC<DataTableProps> = ({
                         )}
                       </div>
                     </th>
-                    <SortableHeader field="client" label="N.Cliente" className="text-center" />
+                    <SortableHeader field="clientNumber" label="N.Cliente" className="text-center" />
                     <SortableHeader field="cpfCnpj" label="CPF/CNPJ" className="text-left" />
                     <th className="px-2 py-2 text-center font-medium text-slate-500 dark:text-slate-400 uppercase">Status</th>
                     <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400 uppercase">Honor.</th>
@@ -889,7 +892,9 @@ const DataTable: React.FC<DataTableProps> = ({
                         <>
                           <td className="px-2 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{formatDate(row.date)}</td>
                           <td className="px-2 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300 font-medium">{formatDate(row.dueDate)}</td>
-                          <td className="px-2 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">{formatDate(row.paymentDate || '')}</td>
+                          <td className="px-2 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">
+                            {isPending ? <span className="text-slate-400">-</span> : formatDate(row.paymentDate || '')}
+                          </td>
                           <td className="px-2 py-2 whitespace-nowrap">
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300">Saída</span>
                           </td>
@@ -961,7 +966,7 @@ const DataTable: React.FC<DataTableProps> = ({
                             {row.client || '-'}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-center text-xs font-bold text-blue-600 dark:text-blue-400">
-                            {rowIndex + 1}
+                            {row.clientNumber ?? '-'}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">
                             {row.cpfCnpj || '-'}
