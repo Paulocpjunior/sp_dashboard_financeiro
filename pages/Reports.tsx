@@ -10,7 +10,7 @@ import { FileText, Download, Filter, Calendar, CheckSquare, Square, PieChart, Re
 
 type ReportMode = 'general' | 'payables' | 'receivables';
 type DateFilterType = 'date' | 'dueDate' | 'paymentDate';
-type SortField = 'date' | 'dueDate' | 'paymentDate' | 'valorOriginal' | 'valorPago' | 'status' | 'client' | 'cpfCnpj';
+type SortField = 'date' | 'dueDate' | 'paymentDate' | 'valorOriginal' | 'valorPago' | 'status' | 'client' | 'clientNumber';
 type SortDirection = 'asc' | 'desc';
 
 // Interface estendida localmente para detalhar Pendente vs Pago
@@ -243,9 +243,9 @@ const Reports: React.FC = () => {
           valA = (a.client || '').toLowerCase();
           valB = (b.client || '').toLowerCase();
           break;
-        case 'cpfCnpj':
-          valA = (a.cpfCnpj || '').toLowerCase();
-          valB = (b.cpfCnpj || '').toLowerCase();
+        case 'clientNumber':
+          valA = a.clientNumber || 0;
+          valB = b.clientNumber || 0;
           break;
         default:
           valA = a.date || '';
@@ -551,7 +551,7 @@ const Reports: React.FC = () => {
                             <option value="dueDate">Data Vencimento</option>
                             <option value="paymentDate">Data Pagamento/Baixa</option>
                             <option value="client">Cliente / Favorecido</option>
-                            {isEntrada && <option value="cpfCnpj">N.Cliente</option>}
+                            {isEntrada && <option value="clientNumber">N.Cliente</option>}
                             <option value="valorOriginal">Valor (Original)</option>
                          </select>
                     </div>
@@ -719,7 +719,7 @@ const Reports: React.FC = () => {
                                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-400">{formatDate(row.date)}</td>
                                       <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-400 font-medium">{formatDate(row.dueDate)}</td>
                                       <td className="px-3 py-2 text-slate-900 dark:text-slate-100 font-medium truncate max-w-[150px]">{row.client || '-'}</td>
-                                      {isEntrada && <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{row.cpfCnpj || '-'}</td>}
+                                      {isEntrada && <td className="px-3 py-2 whitespace-nowrap text-slate-500 dark:text-slate-500">{row.clientNumber ?? '-'}</td>}
                                       {isSaida && <td className="px-3 py-2 text-slate-500 dark:text-slate-500 truncate max-w-[150px]">{row.observacaoAPagar || '-'}</td>}
                                       <td className="px-3 py-2 whitespace-nowrap">
                                          <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium ${
