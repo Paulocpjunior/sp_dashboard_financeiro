@@ -1,11 +1,13 @@
 
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { User, Shield, CheckCircle, XCircle, Loader2, Database, Save, RotateCcw, AlertTriangle, UserPlus, Clock, Mail, Phone, X, Eye, EyeOff, RefreshCw, Key, Lock, Unlock } from 'lucide-react';
+import { User, Shield, CheckCircle, XCircle, Loader2, Database, Save, RotateCcw, AlertTriangle, UserPlus, Clock, Mail, Phone, X, Eye, EyeOff, RefreshCw, Key, Lock, Unlock, Trash2 } from 'lucide-react';
 import { BackendService } from '../services/backendService';
 import { DataService } from '../services/dataService';
 import { User as UserType } from '../types';
 import { MOCK_USERS, APPS_SCRIPT_URL } from '../constants';
+import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { db } from '../services/firebaseConfig';
 
 // MigrationPanel removed - migration complete
 
@@ -53,7 +55,65 @@ const Admin: React.FC = () => {
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [isSavingPass, setIsSavingPass] = useState(false);
 
-  // Carregar usuários pendentes do Apps Script
+  // Deduplicação State
+  const [dedupStatus, setDedupStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [dedupLog, setDedupLog] = useState<string[]>([]);
+  const [dedupProgress, setDedupProgress] = useState(0);
+
+  const handleDedup = async () => {
+    if (!confirm('Isso irá remover documentos duplicados do Firestore. Continuar?')) return;
+    setDedupStatus('running');
+    setDedupLog([]);
+    setDedupProgress(0);
+
+    const log = (msg: string) => setDedupLog(prev => [...prev, msg]);
+
+    try {
+      log('📋 Carregando transações do Firestore...');
+      const snapshot = await getDocs(collection(db, 'transactions'));
+      log(`   ${snapshot.size} documentos encontrados.`);
+      setDedupProgress(20);
+
+      // Identifica IDs aleatórios (não-trx-N) — gerados pelo MigrationPanel antigo
+      const TRX_RE = /^trx-\d+$/;
+      const randomDocs = snapshot.docs.filter(d => !TRX_RE.test(d.id));
+      const legitDocs  = snapshot.size - randomDocs.length;
+
+      log(`✅ IDs legítimos (trx-N): ${legitDocs}`);
+      log(`🗑️  IDs aleatórios (duplicatas): ${randomDocs.length}`);
+      setDedupProgress(40);
+
+      if (randomDocs.length === 0) {
+        log('✔ Nenhum duplicado encontrado!');
+        setDedupStatus('done');
+        setDedupProgress(100);
+        return;
+      }
+
+      // Deletar em batches de 400
+      const BATCH_SIZE = 400;
+      let deleted = 0;
+      for (let i = 0; i < randomDocs.length; i += BATCH_SIZE) {
+        const chunk = randomDocs.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(d => batch.delete(doc(db, 'transactions', d.id)));
+        await batch.commit();
+        deleted += chunk.length;
+        const pct = 40 + Math.round((deleted / randomDocs.length) * 55);
+        setDedupProgress(pct);
+        log(`   Deletados ${deleted}/${randomDocs.length}...`);
+      }
+
+      log(`\n✔ Concluído! ${deleted} duplicatas removidas.`);
+      log(`   Coleção agora com ${legitDocs} documentos únicos.`);
+      setDedupStatus('done');
+      setDedupProgress(100);
+      await DataService.refreshCache();
+    } catch (err: any) {
+      log(`❌ Erro: ${err.message}`);
+      setDedupStatus('error');
+    }
+  };
   const loadPendingUsers = async () => {
     setLoadingPending(true);
     
@@ -520,6 +580,50 @@ const Admin: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Deduplicação Firestore */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6 animate-in slide-in-from-bottom-2">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-red-600 dark:text-red-400">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 dark:text-white">Remover Duplicatas</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Remove docs com IDs aleatórios gerados por migrações anteriores</p>
+              </div>
+            </div>
+            <button
+              onClick={handleDedup}
+              disabled={dedupStatus === 'running'}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              {dedupStatus === 'running' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {dedupStatus === 'running' ? 'Processando...' : 'Deduplicar Firestore'}
+            </button>
+          </div>
+
+          {dedupLog.length > 0 && (
+            <div className="mt-3 bg-slate-900 dark:bg-black rounded-lg p-4 font-mono text-xs text-green-400 max-h-40 overflow-y-auto space-y-0.5">
+              {dedupLog.map((line, i) => <div key={i}>{line}</div>)}
+            </div>
+          )}
+
+          {dedupStatus === 'running' && (
+            <div className="mt-3">
+              <div className="h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div className="h-full bg-red-500 rounded-full transition-all duration-500" style={{ width: `${dedupProgress}%` }} />
+              </div>
+              <p className="text-xs text-slate-500 mt-1 text-right">{dedupProgress}%</p>
+            </div>
+          )}
+
+          {dedupStatus === 'done' && (
+            <div className="mt-3 flex items-center gap-2 text-green-600 dark:text-green-400 text-sm">
+              <CheckCircle className="h-4 w-4" /> Deduplicação concluída com sucesso!
             </div>
           )}
         </div>
