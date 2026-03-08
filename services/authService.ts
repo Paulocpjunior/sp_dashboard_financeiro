@@ -16,6 +16,13 @@ interface LoginResult {
 }
 
 // Função para fazer login via Apps Script usando GET (evita CORS)
+// Verificar mock users primeiro (Firebase mode)
+    const mockUser = MOCK_USERS.find(u => u.username === username && u.password === password);
+    if (mockUser) {
+      const session = { ...mockUser, isAuthenticated: true, loginTime: new Date().toISOString() };
+      localStorage.setItem('sp_session', JSON.stringify(session));
+      return { success: true, user: session };
+    }
 const loginViaAPI = async (username: string, password: string): Promise<LoginResult> => {
   const usernameClean = username.toLowerCase().trim();
   const urlsToTry = [APPS_SCRIPT_URL, ...ALT_APPS_SCRIPT_URLS];
