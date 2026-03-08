@@ -17,7 +17,7 @@ interface LoginResult {
 }
 
 const MOCK_PASSWORDS: Record<string, string> = {
-  'admin': 'admin123',
+  'admin': 'jj123@Mudar',
   'operador1': 'op1234',
   'operador2': 'op5678'
 };
