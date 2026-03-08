@@ -81,6 +81,10 @@ export const DataService = {
               if (excludedIds.includes(t.id)) {
                 t.isExcluded = true;
               }
+              // Sanitize: Pendente entries should NOT have paymentDate
+              if (t.status === 'Pendente' && t.paymentDate) {
+                t.paymentDate = '';
+              }
             });
 
             CACHED_TRANSACTIONS = data;

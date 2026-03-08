@@ -1,6 +1,7 @@
-import { MOCK_USERS } from '../constants';
 import { User } from '../types';
-import { APPS_SCRIPT_URL, ALT_APPS_SCRIPT_URLS } from '../constants';
+import { MOCK_USERS, APPS_SCRIPT_URL, ALT_APPS_SCRIPT_URLS } from '../constants';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from './firebaseConfig';
 
 const AUTH_STORAGE_KEY = 'sp_contabil_auth';
 
@@ -15,162 +16,148 @@ interface LoginResult {
   message?: string;
 }
 
-// Função para fazer login via Apps Script usando GET (evita CORS)
-// Verificar mock users primeiro (Firebase mode)
-    const mockUser = MOCK_USERS.find(u => u.username === username && u.password === password);
-    if (mockUser) {
-      const session = { ...mockUser, isAuthenticated: true, loginTime: new Date().toISOString() };
-      localStorage.setItem('sp_session', JSON.stringify(session));
-      return { success: true, user: session };
-    }
-const loginViaAPI = async (username: string, password: string): Promise<LoginResult> => {
-  const usernameClean = username.toLowerCase().trim();
-  const urlsToTry = [APPS_SCRIPT_URL, ...ALT_APPS_SCRIPT_URLS];
-  
-  let lastError = null;
+const MOCK_PASSWORDS: Record<string, string> = {
+  'admin': 'admin123',
+  'operador1': 'op1234',
+  'operador2': 'op5678'
+};
 
+const sha256 = async (message: string): Promise<string> => {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
+const loginViaFirestore = async (username: string, password: string): Promise<LoginResult> => {
+  try {
+    const usersRef = collection(db, 'users');
+    const snapshot = await getDocs(usersRef);
+    const passwordHash = await sha256(password);
+    
+    for (const doc of snapshot.docs) {
+      const userData = doc.data();
+      const dbUsername = (userData.username || userData.name || '').toLowerCase().trim();
+      const dbEmail = (userData.email || '').toLowerCase().trim();
+      
+      if (dbUsername === username || dbEmail === username) {
+        const dbPassHash = userData.passwordHash || userData.password_hash || '';
+        const dbPassword = userData.password || '';
+        
+        if (dbPassHash === passwordHash || dbPassword === password) {
+          const user: User = {
+            id: doc.id,
+            username: dbUsername,
+            name: userData.name || dbUsername,
+            role: (userData.role || 'operacional').toLowerCase().trim() as any,
+            active: userData.active !== false && userData.isVerified !== false,
+            email: userData.email || '',
+            passwordHash: dbPassHash
+          };
+          
+          if (!user.active) {
+            return { success: false, message: 'Usuário desativado. Contate o administrador.' };
+          }
+          return { success: true, user };
+        }
+      }
+    }
+    return { success: false, message: '' };
+  } catch (error) {
+    console.warn('[AuthService] Firestore auth falhou:', error);
+    return { success: false, message: '' };
+  }
+};
+
+const loginViaMock = (username: string, password: string): LoginResult => {
+  const mockUser = MOCK_USERS.find(u => u.username === username);
+  if (mockUser && MOCK_PASSWORDS[username] === password) {
+    return { success: true, user: mockUser };
+  }
+  return { success: false, message: '' };
+};
+
+const loginViaAPI = async (username: string, password: string): Promise<LoginResult> => {
+  const urlsToTry = [APPS_SCRIPT_URL, ...ALT_APPS_SCRIPT_URLS];
   for (const baseUrl of urlsToTry) {
     try {
-      const params = new URLSearchParams({
-        action: 'loginGet',
-        username: usernameClean,
-        password: password,
-      });
-      
+      const params = new URLSearchParams({ action: 'loginGet', username, password });
       const url = `${baseUrl}?${params.toString()}`;
-      console.log(`[AuthService] Tentando login em: ${baseUrl.substring(0, 45)}...`);
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        redirect: 'follow',
-      });
-
-      if (!response.ok) {
-        console.warn(`[AuthService] Falha na URL ${baseUrl.substring(0, 30)}: Status ${response.status}`);
-        continue;
-      }
-
+      const response = await fetch(url, { method: 'GET', redirect: 'follow' });
+      if (!response.ok) continue;
       const text = await response.text();
       try {
         const result = JSON.parse(text);
-        if (result && (result.success || result.user)) {
-          console.log('[AuthService] Login bem sucedido na URL:', baseUrl.substring(0, 45));
-          return result;
-        }
-        // Se retornou success: false, mas é um JSON válido, respeitamos o erro do servidor
-        if (result && result.success === false) {
-           console.warn('[AuthService] Servidor negou login:', result.message);
-           return result;
-        }
-      } catch (e) {
-        console.warn(`[AuthService] Resposta não é JSON na URL ${baseUrl.substring(0, 30)}`);
-        continue;
-      }
-      
-    } catch (error) {
-      console.error(`[AuthService] Erro na URL ${baseUrl.substring(0, 30)}:`, error);
-      lastError = error;
-    }
+        if (result && (result.success || result.user)) return result;
+        if (result && result.success === false) return result;
+      } catch (e) { continue; }
+    } catch (error) { continue; }
   }
-  
-  return { success: false, message: 'Erro de conexão com todos os servidores de autenticação. Verifique sua internet.' };
+  return { success: false, message: '' };
 };
 
 export const AuthService = {
-  // Mock users para modo Firebase (sem depender do Apps Script)
-    const mockPasswords: Record<string, string> = {
-      'admin': 'admin123',
-      'operador1': 'op1234',
-      'operador2': 'op5678'
-    };
-    
-    const mockUser = MOCK_USERS.find(u => u.username === username);
-    if (mockUser && mockPasswords[username] === password) {
-      const authState: AuthState = {
-        user: mockUser,
-        isAuthenticated: true,
-      };
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
-      return { success: true, user: mockUser };
-    }
-  // Login
   login: async (username: string, password: string): Promise<LoginResult> => {
-    console.log('[AuthService] Tentando login:', username);
+    const usernameClean = username.toLowerCase().trim();
+    console.log('[AuthService] Tentando login:', usernameClean);
     
-    // Tentar login via API (planilha)
-    const apiResult = await loginViaAPI(username, password);
-    
-    if (apiResult.success && apiResult.user) {
-      // NORMALIZAÇÃO DE DADOS DO USUÁRIO
-      // Garante que o role seja sempre minúsculo e sem espaços ('Admin ' -> 'admin')
-      // Isso corrige problemas de permissão se a planilha tiver formatação diferente
-      const normalizedUser: User = {
-        ...apiResult.user,
-        role: (apiResult.user.role || 'operacional').toLowerCase().trim() as any
-      };
-
-      // Salvar no localStorage
-      const authState: AuthState = {
-        user: normalizedUser,
-        isAuthenticated: true,
-      };
+    // 1. Mock users
+    const mockResult = loginViaMock(usernameClean, password);
+    if (mockResult.success && mockResult.user) {
+      const authState: AuthState = { user: mockResult.user, isAuthenticated: true };
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
-      
-      console.log('[AuthService] Login bem sucedido:', normalizedUser.name, 'Role:', normalizedUser.role);
-      return { success: true, user: normalizedUser };
+      console.log('[AuthService] Login via Mock:', mockResult.user.name);
+      return { success: true, user: mockResult.user };
     }
     
-    return { success: false, message: apiResult.message || 'Credenciais inválidas.' };
-  },
-
-  // Logout
-  logout: (): void => {
-    try {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-      console.log('[AuthService] Logout realizado');
-    } catch (e) {
-      console.error('[AuthService] Erro ao remover do localStorage:', e);
+    // 2. Firestore
+    const firestoreResult = await loginViaFirestore(usernameClean, password);
+    if (firestoreResult.success && firestoreResult.user) {
+      const user = { ...firestoreResult.user, role: (firestoreResult.user.role || 'operacional').toLowerCase().trim() as any };
+      const authState: AuthState = { user, isAuthenticated: true };
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
+      console.log('[AuthService] Login via Firestore:', user.name, 'Role:', user.role);
+      return { success: true, user };
     }
+    
+    // 3. Apps Script (legacy)
+    const apiResult = await loginViaAPI(usernameClean, password);
+    if (apiResult.success && apiResult.user) {
+      const user = { ...apiResult.user, role: (apiResult.user.role || 'operacional').toLowerCase().trim() as any };
+      const authState: AuthState = { user, isAuthenticated: true };
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
+      return { success: true, user };
+    }
+    
+    return { success: false, message: firestoreResult.message || apiResult.message || 'Usuário não encontrado ou senha incorreta.' };
   },
 
-  // Verificar se está autenticado
+  logout: (): void => {
+    try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch (e) {}
+  },
+
   isAuthenticated: (): boolean => {
     try {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (!stored) return false;
-      
       const authState: AuthState = JSON.parse(stored);
       return authState.isAuthenticated && authState.user !== null;
-    } catch (e) {
-      console.error('[AuthService] Erro ao acessar localStorage:', e);
-      return false;
-    }
+    } catch (e) { return false; }
   },
 
-  // Obter usuário atual
   getCurrentUser: (): User | null => {
     try {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (!stored) return null;
-      
       const authState: AuthState = JSON.parse(stored);
       return authState.user;
-    } catch (e) {
-      console.error('[AuthService] Erro ao obter usuário do localStorage:', e);
-      return null;
-    }
+    } catch (e) { return null; }
   },
 
-  // Atualizar dados do usuário no localStorage
   updateCurrentUser: (user: User): void => {
     try {
-      const authState: AuthState = {
-        user: user,
-        isAuthenticated: true,
-      };
+      const authState: AuthState = { user, isAuthenticated: true };
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
-    } catch (e) {
-      console.error('[AuthService] Erro ao salvar no localStorage:', e);
-    }
+    } catch (e) {}
   },
 };
