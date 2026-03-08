@@ -36,21 +36,25 @@ export const MigrationPanel: React.FC = () => {
              addLog(msg);
          });
       } else {
-         // Implementação direta caso o método não exista no FirebaseService
-         const BATCH_SIZE = 500;
+         // Implementação direta — usa setDoc com ID determinístico (trx-INDEX)
+         // para evitar duplicatas em caso de múltiplas execuções
+         const BATCH_SIZE = 400;
          for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
             const batch = writeBatch(db);
             const chunk = transactions.slice(i, i + BATCH_SIZE);
             
-            chunk.forEach(t => {
-               const docRef = doc(collection(db, 'transactions'));
-               batch.set(docRef, t);
+            chunk.forEach((t, chunkIdx) => {
+               const globalIdx = i + chunkIdx;
+               // ID determinístico: usa t.id existente ou gera trx-INDEX
+               const docId = (t.id && t.id.startsWith('trx-')) ? t.id : `trx-${globalIdx}`;
+               const docRef = doc(db, 'transactions', docId);
+               batch.set(docRef, { ...t, id: docId }, { merge: false });
             });
             
             await batch.commit();
             const currentProgress = Math.round(((i + chunk.length) / transactions.length) * 100);
             setProgress(currentProgress);
-            addLog(`Lote ${Math.floor(i/BATCH_SIZE) + 1} salvo no Firestore (${chunk.length} itens)...`);
+            addLog(`Lote ${Math.floor(i/BATCH_SIZE) + 1} salvo (${chunk.length} itens, IDs determinísticos)...`);
          }
       }
 

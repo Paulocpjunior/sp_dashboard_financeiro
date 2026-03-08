@@ -195,7 +195,16 @@ export const DataService = {
 
   getUniqueValues: (field: keyof Transaction): string[] => {
     if (!isDataLoaded) return [];
-    const values = new Set(CACHED_TRANSACTIONS.map(t => String(t[field] || '').trim()).filter(Boolean));
+    const normalizeStatusVal = (s: string): string => {
+      const v = s.toLowerCase().trim();
+      if (["recebido","quitado","sim","ok","liquidado","pago"].includes(v)) return 'Pago';
+      if (v === "agendado") return 'Agendado';
+      if (["pendente","nao","não","aberto"].includes(v)) return 'Pendente';
+      return s.trim();
+    };
+    const rawValues = CACHED_TRANSACTIONS.map(t => String(t[field] || '').trim()).filter(Boolean);
+    const normalized = field === 'status' ? rawValues.map(normalizeStatusVal) : rawValues;
+    const values = new Set(normalized);
     return Array.from(values).sort();
   },
 
@@ -273,7 +282,17 @@ export const DataService = {
           
           if (filters.bankAccount && item.bankAccount !== filters.bankAccount) matches = false;
           if (filters.type && item.type !== filters.type) matches = false;
-          if (filters.status && item.status !== filters.status) matches = false;
+          if (filters.status) {
+            // Normaliza aliases: Recebido/Quitado/Sim/OK → Pago
+            const normalizeItemStatus = (s: string): string => {
+              const v = (s || '').toLowerCase().trim();
+              if (v === 'recebido' || v === 'quitado' || v === 'sim' || v === 'ok' || v === 'liquidado') return 'Pago';
+              if (v === 'pago') return 'Pago';
+              if (v === 'agendado') return 'Agendado';
+              return 'Pendente';
+            };
+            if (normalizeItemStatus(item.status) !== filters.status) matches = false;
+          }
           if (filters.movement && item.movement !== filters.movement) matches = false;
           if (filters.paidBy && item.paidBy !== filters.paidBy) matches = false;
           
