@@ -1,4 +1,4 @@
-
+import { MOCK_USERS } from '../constants';
 import { User } from '../types';
 import { APPS_SCRIPT_URL, ALT_APPS_SCRIPT_URLS } from '../constants';
 
@@ -77,6 +77,22 @@ const loginViaAPI = async (username: string, password: string): Promise<LoginRes
 };
 
 export const AuthService = {
+  // Mock users para modo Firebase (sem depender do Apps Script)
+    const mockPasswords: Record<string, string> = {
+      'admin': 'admin123',
+      'operador1': 'op1234',
+      'operador2': 'op5678'
+    };
+    
+    const mockUser = MOCK_USERS.find(u => u.username === username);
+    if (mockUser && mockPasswords[username] === password) {
+      const authState: AuthState = {
+        user: mockUser,
+        isAuthenticated: true,
+      };
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
+      return { success: true, user: mockUser };
+    }
   // Login
   login: async (username: string, password: string): Promise<LoginResult> => {
     console.log('[AuthService] Tentando login:', username);
