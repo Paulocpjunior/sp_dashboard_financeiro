@@ -18,6 +18,7 @@ interface DataTableProps {
   allData?: Transaction[];
   onDelete?: (id: string) => void;
   onClientClick?: (clientName: string) => void;
+  onMarkAsPaid?: (id: string) => void;
 }
 
 type SortField = 'client' | 'clientNumber' | 'dueDate' | 'receiptDate' | 'cpfCnpj' | 'none';
@@ -103,7 +104,8 @@ const DataTable: React.FC<DataTableProps> = ({
     selectedType = '',
     allData = [],
     onDelete,
-    onClientClick
+    onClientClick,
+    onMarkAsPaid
 }) => {
   const [sortField, setSortField] = useState<SortField>('none');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -923,13 +925,24 @@ const DataTable: React.FC<DataTableProps> = ({
                             {isPago ? formatCurrency(row.valuePaid) : 'R$ 0,00'}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-center">
-                            <button 
-                              onClick={() => onDelete && onDelete(row.id)}
-                              className="p-1 text-slate-400 hover:text-red-500 transition-colors rounded-md hover:bg-red-50 dark:hover:bg-red-900/20"
-                              title="Excluir"
-                            >
-                              <Ban className="h-4 w-4" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              {isPending && onMarkAsPaid && (
+                                <button 
+                                  onClick={() => onMarkAsPaid(row.id)}
+                                  className="p-1 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 transition-colors rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                                  title="Dar Baixa (Marcar como Pago)"
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => onDelete && onDelete(row.id)}
+                                className="p-1 text-slate-400 hover:text-red-500 transition-colors rounded-md hover:bg-red-50 dark:hover:bg-red-900/20"
+                                title="Excluir"
+                              >
+                                <Ban className="h-4 w-4" />
+                              </button>
+                            </div>
                           </td>
                         </>
                       )}
@@ -1014,6 +1027,15 @@ const DataTable: React.FC<DataTableProps> = ({
                             >
                               <Ban className="h-4 w-4" />
                             </button>
+                            {isPending && onMarkAsPaid && (
+                              <button 
+                                onClick={() => onMarkAsPaid(row.id)}
+                                className="p-1 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 transition-colors rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                                title="Dar Baixa (Marcar como Pago)"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </td>
                         </>
                       )}
@@ -1067,6 +1089,15 @@ const DataTable: React.FC<DataTableProps> = ({
                             >
                               <Ban className="h-4 w-4" />
                             </button>
+                            {isPending && onMarkAsPaid && (
+                              <button 
+                                onClick={() => onMarkAsPaid(row.id)}
+                                className="p-1 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 transition-colors rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                                title="Dar Baixa (Marcar como Pago)"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                              </button>
+                            )}
                           </td>
                         </>
                       )}

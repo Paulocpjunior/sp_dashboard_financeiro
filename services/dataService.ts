@@ -28,6 +28,59 @@ const normalizeText = (text: string) => {
     .replace(/[\u0300-\u036f]/g, '');
 };
 
+// Mapa de correção de nomes de movimentação/descrição
+// Chave: nome errado (como está no Firebase/Planilha)
+// Valor: nome correto (como deve aparecer no sistema)
+const DESCRIPTION_NORMALIZATION_MAP: Record<string, string> = {
+  // Dare (antiga Desafio)
+  'desafio': 'Dare',
+  'dare': 'Dare',
+  'desafio sp': 'Dare',
+  'dare sp': 'Dare',
+
+  // Net Eunice
+  'tacela de rede eunice': 'Net Eunice',
+  'tacelã de rede eunice': 'Net Eunice',
+  'tacelã eunice': 'Net Eunice',
+  'tacela eunice': 'Net Eunice',
+  'rede eunice': 'Net Eunice',
+  'net eunice': 'Net Eunice',
+  'tacelã de rede': 'Net Eunice',
+  'tacela de rede': 'Net Eunice',
+  'tacelan de rede eunice': 'Net Eunice',
+  'tacelan eunice': 'Net Eunice',
+
+  // Net Itapeti
+  'liquido itapeti': 'Net Itapeti',
+  'líquido itapeti': 'Net Itapeti',
+  'net itapeti liquido': 'Net Itapeti',
+  'net itapeti': 'Net Itapeti',
+  'itapeti liquido': 'Net Itapeti',
+  'itapeti líquido': 'Net Itapeti',
+  'net itapeti liq': 'Net Itapeti',
+  'itapeti liq': 'Net Itapeti',
+
+  // Imposto a pagar cliente
+  'imposto a pagar cliente': 'Imposto a Pagar Cliente',
+  'imposto pagar cliente': 'Imposto a Pagar Cliente',
+  'imposto cliente': 'Imposto a Pagar Cliente',
+  'imp a pagar cliente': 'Imposto a Pagar Cliente',
+  'imposto a pagar': 'Imposto a Pagar Cliente',
+};
+
+const normalizeDescription = (desc: string): string => {
+  if (!desc) return desc;
+  const key = desc.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  // Exact match
+  for (const [wrong, correct] of Object.entries(DESCRIPTION_NORMALIZATION_MAP)) {
+    const wrongNorm = wrong.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (key === wrongNorm) return correct;
+    // Partial match — if the description starts with the wrong name
+    if (key.startsWith(wrongNorm)) return correct;
+  }
+  return desc;
+};
+
 export const DataService = {
   
   get isDataLoaded() {
@@ -75,7 +128,7 @@ export const DataService = {
                 throw new Error("Formato de dados inválido recebido do backend.");
             }
 
-            // Apply exclusions
+            // Apply exclusions + description normalization
             const excludedIds = JSON.parse(localStorage.getItem('excluded_transactions') || '[]');
             data.forEach(t => {
               if (excludedIds.includes(t.id)) {
@@ -84,6 +137,17 @@ export const DataService = {
               // Sanitize: Pendente entries should NOT have paymentDate
               if (t.status === 'Pendente' && t.paymentDate) {
                 t.paymentDate = '';
+              }
+              // Normalizar nomes de movimentação/descrição incorretos
+              if (t.description) {
+                t.description = normalizeDescription(t.description);
+              }
+              // Também normalizar o campo client quando for uma saída (favorecido)
+              if (t.client) {
+                const clientNorm = normalizeDescription(t.client);
+                if (clientNorm !== t.client) {
+                  t.client = clientNorm;
+                }
               }
             });
 
@@ -139,6 +203,29 @@ export const DataService = {
       transaction.isExcluded = !transaction.isExcluded;
     }
     
+    DataService.notifyListeners();
+  },
+
+  /**
+   * Marca uma transação como paga (Dar Baixa) — atualiza Firebase e o cache local.
+   */
+  markAsPaid: async (id: string): Promise<void> => {
+    const today = new Date().toISOString().slice(0, 10);
+    const updates: Partial<Transaction> = {
+      status: 'Pago',
+      paymentDate: today,
+    };
+
+    // Atualiza no Firebase
+    await FirebaseService.updateTransaction(id, updates);
+
+    // Atualiza o cache local imediatamente para refletir na UI
+    const transaction = CACHED_TRANSACTIONS.find(t => t.id === id);
+    if (transaction) {
+      transaction.status = 'Pago';
+      transaction.paymentDate = today;
+    }
+
     DataService.notifyListeners();
   },
 

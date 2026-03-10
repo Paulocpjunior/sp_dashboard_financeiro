@@ -406,6 +406,24 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleMarkAsPaid = async (id: string) => {
+    if (window.confirm('Confirmar baixa? Isso marcará a transação como PAGA com a data de hoje e atualizará o Firebase.')) {
+      try {
+        await DataService.markAsPaid(id);
+        // Recarrega dados imediatamente para refletir o status "Pago" na tabela
+        const { result, kpi: newKpi } = DataService.getTransactions(filters, page);
+        const { result: allResult } = DataService.getTransactions(filters, 1, 999999);
+        setData(result.data);
+        setAllFilteredData(allResult.data);
+        setTotalPages(result.totalPages);
+        setKpi(newKpi);
+      } catch (err) {
+        console.error('Erro ao dar baixa:', err);
+        alert('Erro ao dar baixa. Tente novamente.');
+      }
+    }
+  };
+
   const handleWhatsAppShare = () => {
     const formatBRL = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
     
@@ -1032,6 +1050,7 @@ const Dashboard: React.FC = () => {
                 totalPages={totalPages}
                 onPageChange={setPage}
                 onDelete={handleDeleteTransaction}
+                onMarkAsPaid={handleMarkAsPaid}
                 clientFilterValue={filters.client}
                 onClientFilterChange={(val) => handleFilterChange('client', val)}
                 clientOptions={options.clients}

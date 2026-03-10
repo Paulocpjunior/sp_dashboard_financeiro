@@ -63,8 +63,9 @@ const Reports: React.FC = () => {
         setLoading(true);
         setInitError(''); // Reset error
 
-        // Se os dados já estiverem carregados (seja real ou mock), usa o que tem.
+        // Se os dados já estiverem carregados, força refresh para garantir normalização atualizada
         if (DataService.isDataLoaded) {
+             await DataService.refreshCache();
              const { result } = DataService.getTransactions({}, 1, 99999);
              setAllTransactions(result.data);
         } else {
@@ -81,13 +82,23 @@ const Reports: React.FC = () => {
       }
     };
     load();
+
+    // Listener para atualizar quando dados mudam (ex: após dar baixa no Dashboard)
+    const unsubscribe = DataService.onRefresh(() => {
+      if (DataService.isDataLoaded) {
+        const { result } = DataService.getTransactions({}, 1, 99999);
+        setAllTransactions(result.data);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // Compute available types dynamically
   const availableTypes = useMemo(() => {
     const mandatoryTypes = [
       'Entrada de Caixa / Contas a Receber', 
-      'Saida de Caixa / Contas a Pagar'
+      'Saída de Caixa / Contas a Pagar'
     ];
     
     const typesFromData = Array.from(new Set(allTransactions.map(t => t.type).filter(Boolean)));
@@ -318,24 +329,30 @@ const Reports: React.FC = () => {
     };
 
     setTimeout(() => {
-      ReportService.generatePDF(
-        filteredData, 
-        kpi, 
-        { 
-            startDate, 
-            endDate, 
-            types: selectedTypes, 
-            status: selectedStatus, 
-            bankAccount: selectedBank,
-            movement: selectedMovement,
-            client: selectedClient, // Passando Cliente
-            dateContext: dateLabelMap[dateFilterType],
-            sortField,
-            sortDirection
-        },
-        AuthService.getCurrentUser()
-      );
-      setGenerating(false);
+      try {
+        ReportService.generatePDF(
+          filteredData, 
+          kpi, 
+          { 
+              startDate, 
+              endDate, 
+              types: selectedTypes, 
+              status: selectedStatus, 
+              bankAccount: selectedBank,
+              movement: selectedMovement,
+              client: selectedClient,
+              dateContext: dateLabelMap[dateFilterType],
+              sortField,
+              sortDirection
+          },
+          AuthService.getCurrentUser()
+        );
+      } catch (err) {
+        console.error('Erro ao gerar PDF:', err);
+        alert('Erro ao gerar o relatório PDF. Verifique os filtros e tente novamente.');
+      } finally {
+        setGenerating(false);
+      }
     }, 500);
   };
 
