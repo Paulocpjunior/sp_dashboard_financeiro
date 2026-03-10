@@ -158,9 +158,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <button
                   key={item.path}
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
                     console.log('Navigating to:', item.path);
-                    navigate(item.path);
+                    try {
+                      navigate(item.path);
+                    } catch (err) {
+                      // Fallback for Safari
+                      window.location.hash = '#' + item.path;
+                    }
+                    // Safari fallback: force hash change if navigate didn't work
+                    setTimeout(() => {
+                      if (window.location.hash !== '#' + item.path) {
+                        window.location.hash = '#' + item.path;
+                      }
+                    }, 100);
                     setIsSidebarOpen(false);
                   }}
                   className={`
