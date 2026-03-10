@@ -6,7 +6,7 @@ import { BackendService } from '../services/backendService';
 import { DataService } from '../services/dataService';
 import { User as UserType } from '../types';
 import { MOCK_USERS, APPS_SCRIPT_URL } from '../constants';
-import { collection, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, setDoc } from 'firebase/firestore';
 import { db } from '../services/firebaseConfig';
 
 
@@ -32,6 +32,12 @@ const Admin: React.FC = () => {
   const [spreadsheetId, setSpreadsheetId] = useState('');
   const [isSavingDb, setIsSavingDb] = useState(false);
   const [dbMessage, setDbMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+
+  // Sincronização Planilha → Firebase
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncTotal, setSyncTotal] = useState(0);
+  const [syncMessage, setSyncMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
 
   // Modal de Novo Usuário
   const [showNewUserModal, setShowNewUserModal] = useState(false);
@@ -162,6 +168,73 @@ const Admin: React.FC = () => {
           setDbMessage({ type: 'success', text: 'Configuração restaurada para o padrão.' });
           DataService.refreshCache().catch(() => {});
       }
+  };
+
+  // ===== SINCRONIZAÇÃO PLANILHA → FIREBASE =====
+  const handleSyncFirebase = async () => {
+    if (!confirm('Isso irá sincronizar os dados da planilha para o Firebase, atualizando status e pagamentos baixados.\n\nContinuar?')) return;
+
+    setIsSyncing(true);
+    setSyncProgress(0);
+    setSyncTotal(0);
+    setSyncMessage({ type: 'info', text: 'Lendo dados da planilha...' });
+
+    try {
+      // 1. Ler todas as transações da planilha
+      const sheetTxs = await BackendService.fetchTransactions();
+      const total = sheetTxs.length;
+      setSyncTotal(total);
+      setSyncMessage({ type: 'info', text: `${total} registros lidos. Sincronizando com Firebase...` });
+
+      // 2. Processar em lotes de 500 (limite do Firestore batch)
+      const BATCH_SIZE = 500;
+      let processed = 0;
+
+      for (let i = 0; i < sheetTxs.length; i += BATCH_SIZE) {
+        const chunk = sheetTxs.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        for (const tx of chunk) {
+          const docRef = doc(db, 'transactions', tx.id);
+          // setDoc com merge: true — cria se não existir, atualiza se já existir
+          batch.set(docRef, {
+            status: tx.status,
+            paymentDate: tx.paymentDate ?? null,
+            valuePaid: tx.valuePaid,
+            valueReceived: tx.valueReceived ?? 0,
+            date: tx.date,
+            dueDate: tx.dueDate,
+            bankAccount: tx.bankAccount,
+            type: tx.type,
+            description: tx.description,
+            client: tx.client,
+            paidBy: tx.paidBy,
+            movement: tx.movement,
+            honorarios: tx.honorarios ?? 0,
+            valorExtra: tx.valorExtra ?? 0,
+            totalCobranca: tx.totalCobranca ?? 0,
+            cpfCnpj: tx.cpfCnpj ?? '',
+            observacaoAPagar: tx.observacaoAPagar ?? '',
+            clientNumber: tx.clientNumber ?? null,
+          }, { merge: true });
+        }
+
+        await batch.commit();
+        processed += chunk.length;
+        setSyncProgress(processed);
+        setSyncMessage({ type: 'info', text: `Sincronizando... ${processed} / ${total}` });
+      }
+
+      setSyncMessage({ type: 'success', text: `✅ Sincronização concluída! ${total} registros atualizados no Firebase.` });
+      // Força recarga do cache do DataService
+      await DataService.refreshCache();
+
+    } catch (error: any) {
+      console.error('[Sync] Erro:', error);
+      setSyncMessage({ type: 'error', text: 'Erro na sincronização: ' + (error.message || 'Tente novamente.') });
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // 1. Bloquear / Desbloquear Usuário
@@ -595,6 +668,77 @@ const Admin: React.FC = () => {
                 }`}>
                     {dbMessage.type === 'success' ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
                     <span className="font-medium">{dbMessage.text}</span>
+                </div>
+            )}
+        </div>
+
+        {/* Sincronização Planilha → Firebase */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6 animate-in slide-in-from-bottom-2">
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                    <div className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-amber-600 dark:text-amber-400">
+                        <RefreshCw className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-bold text-slate-800 dark:text-white">Sincronizar Planilha → Firebase</h2>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Atualiza status de pagamentos baixados no Contas a Pagar</p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-amber-50 dark:bg-amber-900/10 p-4 rounded-lg border border-amber-200 dark:border-amber-800 mb-5">
+                <p className="text-sm text-amber-800 dark:text-amber-300 flex gap-2 items-start">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>
+                        Use quando o <strong>Contas a Pagar</strong> não refletir os pagamentos baixados via JotForm.
+                        Lê todos os dados da planilha e atualiza o Firebase (status, data de pagamento, valores).
+                    </span>
+                </p>
+            </div>
+
+            {isSyncing && syncTotal > 0 && (
+                <div className="mb-4">
+                    <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+                        <span>Progresso</span>
+                        <span>{syncProgress} / {syncTotal}</span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+                        <div
+                            className="bg-amber-500 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${syncTotal > 0 ? (syncProgress / syncTotal) * 100 : 0}%` }}
+                        />
+                    </div>
+                </div>
+            )}
+
+            <button
+                onClick={handleSyncFirebase}
+                disabled={isSyncing}
+                className="w-full sm:w-auto px-6 py-2.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 text-sm font-medium flex items-center justify-center gap-2 shadow-sm"
+            >
+                {isSyncing ? (
+                    <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Sincronizando...</span>
+                    </>
+                ) : (
+                    <>
+                        <RefreshCw className="h-4 w-4" />
+                        <span>Sincronizar Agora</span>
+                    </>
+                )}
+            </button>
+
+            {syncMessage && (
+                <div className={`mt-4 p-3 rounded-lg text-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-1 ${
+                    syncMessage.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 border border-green-200 dark:border-green-800' :
+                    syncMessage.type === 'error' ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300 border border-red-200 dark:border-red-800' :
+                    'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                }`}>
+                    {syncMessage.type === 'success' ? <CheckCircle className="h-4 w-4 shrink-0" /> :
+                     syncMessage.type === 'error' ? <XCircle className="h-4 w-4 shrink-0" /> :
+                     <Loader2 className="h-4 w-4 shrink-0 animate-spin" />}
+                    <span className="font-medium">{syncMessage.text}</span>
                 </div>
             )}
         </div>
