@@ -32,33 +32,48 @@ const normalizeText = (text: string) => {
 // Chave: nome errado (como está no Firebase/Planilha)
 // Valor: nome correto (como deve aparecer no sistema)
 const DESCRIPTION_NORMALIZATION_MAP: Record<string, string> = {
-  // Dare (antiga Desafio)
+  // Dare (antiga Desafio) — Google Translate traduz "Dare" → "Desafio"
   'desafio': 'Dare',
   'dare': 'Dare',
   'desafio sp': 'Dare',
   'dare sp': 'Dare',
+  'ousar': 'Dare',          // outra tradução de "dare"
+  'atrever': 'Dare',        // outra tradução de "dare"
 
-  // Net Eunice
-  'tacela de rede eunice': 'Net Eunice',
-  'tacelã de rede eunice': 'Net Eunice',
+  // Net Eunice — Google Translate traduz "Net" → "Rede"/"Tecelã de rede"/"Tela"
+  'tecela de rede eunice': 'Net Eunice',     // "Tecelã" sem acentos = "tecela"
+  'tecelã de rede eunice': 'Net Eunice',     // variante acentuada
+  'tacela de rede eunice': 'Net Eunice',     // variante com "a"
+  'tacelã de rede eunice': 'Net Eunice',     // variante acentuada com "a"
+  'tecelan de rede eunice': 'Net Eunice',
+  'tacelan de rede eunice': 'Net Eunice',
+  'tecela eunice': 'Net Eunice',
+  'tecelã eunice': 'Net Eunice',
   'tacelã eunice': 'Net Eunice',
   'tacela eunice': 'Net Eunice',
+  'tacelan eunice': 'Net Eunice',
+  'tecelan eunice': 'Net Eunice',
   'rede eunice': 'Net Eunice',
   'net eunice': 'Net Eunice',
+  'tecelã de rede': 'Net Eunice',
+  'tecela de rede': 'Net Eunice',
   'tacelã de rede': 'Net Eunice',
   'tacela de rede': 'Net Eunice',
-  'tacelan de rede eunice': 'Net Eunice',
-  'tacelan eunice': 'Net Eunice',
+  'tela eunice': 'Net Eunice',
+  'tela de rede eunice': 'Net Eunice',
 
-  // Net Itapeti
+  // Net Itapeti — Google Translate traduz "Net" → "Líquido"/"Rede"
   'liquido itapeti': 'Net Itapeti',
   'líquido itapeti': 'Net Itapeti',
+  'liquida itapeti': 'Net Itapeti',
   'net itapeti liquido': 'Net Itapeti',
   'net itapeti': 'Net Itapeti',
   'itapeti liquido': 'Net Itapeti',
   'itapeti líquido': 'Net Itapeti',
   'net itapeti liq': 'Net Itapeti',
   'itapeti liq': 'Net Itapeti',
+  'rede itapeti': 'Net Itapeti',
+  'tela itapeti': 'Net Itapeti',
 
   // Imposto a pagar cliente
   'imposto a pagar cliente': 'Imposto a Pagar Cliente',
@@ -66,18 +81,36 @@ const DESCRIPTION_NORMALIZATION_MAP: Record<string, string> = {
   'imposto cliente': 'Imposto a Pagar Cliente',
   'imp a pagar cliente': 'Imposto a Pagar Cliente',
   'imposto a pagar': 'Imposto a Pagar Cliente',
+  'taxa a pagar cliente': 'Imposto a Pagar Cliente',
 };
+
+// Keywords de fallback para quando o match exato/prefix não pega
+const KEYWORD_FALLBACK_MAP: [string[], string][] = [
+  [['eunice', 'rede'], 'Net Eunice'],     // qualquer combo de "eunice" + "rede" ou "tecelã"
+  [['eunice', 'tecela'], 'Net Eunice'],
+  [['eunice', 'tacela'], 'Net Eunice'],
+  [['eunice', 'tela'], 'Net Eunice'],
+  [['itapeti', 'liquido'], 'Net Itapeti'],
+  [['itapeti', 'rede'], 'Net Itapeti'],
+  [['itapeti', 'tela'], 'Net Itapeti'],
+];
 
 const normalizeDescription = (desc: string): string => {
   if (!desc) return desc;
   const key = desc.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-  // Exact match
+  
+  // 1. Exact match or prefix match against the map
   for (const [wrong, correct] of Object.entries(DESCRIPTION_NORMALIZATION_MAP)) {
     const wrongNorm = wrong.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (key === wrongNorm) return correct;
-    // Partial match — if the description starts with the wrong name
     if (key.startsWith(wrongNorm)) return correct;
   }
+  
+  // 2. Keyword-based fallback: se o texto contém TODAS as keywords do grupo, normaliza
+  for (const [keywords, correct] of KEYWORD_FALLBACK_MAP) {
+    if (keywords.every(kw => key.includes(kw))) return correct;
+  }
+  
   return desc;
 };
 
@@ -138,6 +171,23 @@ export const DataService = {
               if (t.status === 'Pendente' && t.paymentDate) {
                 t.paymentDate = '';
               }
+              // ★ Normalizar status: "Sim", "Recebido", "Quitado", "OK", "Liquidado" → "Pago"
+              if (t.status) {
+                const sLower = (t.status as string).toLowerCase().trim();
+                if (['sim', 'recebido', 'quitado', 'ok', 'liquidado', 's'].includes(sLower)) {
+                  t.status = 'Pago';
+                } else if (['pago'].includes(sLower)) {
+                  t.status = 'Pago';
+                } else if (['pendente', 'nao', 'não', 'n', 'aberto', 'em aberto', ''].includes(sLower)) {
+                  t.status = 'Pendente';
+                } else if (['agendado', 'programado'].includes(sLower)) {
+                  t.status = 'Agendado';
+                }
+              }
+              // Re-check paymentDate after status normalization
+              if (t.status === 'Pendente' && t.paymentDate) {
+                t.paymentDate = '';
+              }
               // Normalizar nomes de movimentação/descrição incorretos
               if (t.description) {
                 t.description = normalizeDescription(t.description);
@@ -148,6 +198,10 @@ export const DataService = {
                 if (clientNorm !== t.client) {
                   t.client = clientNorm;
                 }
+              }
+              // Normalizar observacaoAPagar (pode ter nomes traduzidos também)
+              if (t.observacaoAPagar) {
+                t.observacaoAPagar = normalizeDescription(t.observacaoAPagar);
               }
             });
 
