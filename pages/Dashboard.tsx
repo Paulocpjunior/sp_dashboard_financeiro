@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
 import KpiCard from '../components/KpiCard';
@@ -63,6 +62,12 @@ const Dashboard: React.FC = () => {
   // Loading States
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState('');
+
+  // Refs para manter filtros/página atuais acessíveis no callback do onRefresh
+  const filtersRef = useRef(filters);
+  const pageRef = useRef(page);
+  filtersRef.current = filters;
+  pageRef.current = page;
 
   // Refresh States
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -149,6 +154,16 @@ const Dashboard: React.FC = () => {
         clients: DataService.getUniqueValues('client'),
         paidBys: DataService.getUniqueValues('paidBy'),
       });
+
+      // ★ FIX: Também atualizar tabela e KPIs com os dados mais recentes do cache
+      const currentFilters = filtersRef.current;
+      const currentPage = pageRef.current;
+      const { result, kpi: newKpi } = DataService.getTransactions(currentFilters, currentPage);
+      const { result: allResult } = DataService.getTransactions(currentFilters, 1, 999999);
+      setData(result.data);
+      setAllFilteredData(allResult.data);
+      setTotalPages(result.totalPages);
+      setKpi(newKpi);
     });
 
     // Iniciar auto-refresh
