@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import Layout from '../components/Layout';
 import { DataService } from '../services/dataService';
@@ -119,6 +118,14 @@ const Reports: React.FC = () => {
     return Array.from(clients).sort();
   }, [allTransactions]);
 
+  // ★ FIX: Compute available bank accounts from data (não usar constantes hardcoded)
+  const availableBanks = useMemo(() => {
+    const banksFromData = Array.from(new Set(allTransactions.map(t => t.bankAccount).filter(Boolean)));
+    // Combinar com constantes para garantir que apareçam opções mesmo sem dados
+    const combined = new Set([...BANK_ACCOUNTS, ...banksFromData]);
+    return Array.from(combined).sort();
+  }, [allTransactions]);
+
   const handleModeChange = (mode: ReportMode) => {
     setReportMode(mode);
     
@@ -186,9 +193,11 @@ const Reports: React.FC = () => {
       });
     }
 
-    // 2. Movement Filtering
+    // 2. Movement Filtering (normalizado para tratar acentuação: Saída/Saida)
     if (selectedMovement) {
-      result = result.filter(t => t.movement === selectedMovement);
+      const normalizeMovement = (m: string) => (m || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const targetMovement = normalizeMovement(selectedMovement);
+      result = result.filter(t => normalizeMovement(t.movement) === targetMovement);
     }
 
     // 3. Type Filtering
@@ -196,14 +205,22 @@ const Reports: React.FC = () => {
       result = result.filter(t => selectedTypes.includes(t.type));
     }
 
-    // 4. Status Filtering
+    // 4. Status Filtering (★ FIX: normalizar antes de comparar)
     if (selectedStatus) {
-      result = result.filter(t => t.status === selectedStatus);
+      const normalizeStatus = (s: string): string => {
+        const v = (s || '').toLowerCase().trim();
+        if (['sim', 'recebido', 'quitado', 'ok', 'liquidado', 's', 'pago'].includes(v)) return 'Pago';
+        if (['agendado', 'programado'].includes(v)) return 'Agendado';
+        return 'Pendente';
+      };
+      result = result.filter(t => normalizeStatus(t.status) === selectedStatus);
     }
 
-    // 5. Bank Filtering
+    // 5. Bank Filtering (★ FIX: case-insensitive e accent-insensitive)
     if (selectedBank) {
-      result = result.filter(t => t.bankAccount === selectedBank);
+      const normalizeBank = (b: string) => (b || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const targetBank = normalizeBank(selectedBank);
+      result = result.filter(t => normalizeBank(t.bankAccount) === targetBank);
     }
 
     // 6. Client Filtering (NOVO)
@@ -328,23 +345,32 @@ const Reports: React.FC = () => {
         'paymentDate': 'Data de Pagamento/Baixa'
     };
 
+    // ★ FIX: Capturar snapshot dos dados ANTES do setTimeout para evitar dados stale
+    const snapshotData = [...filteredData];
+    const snapshotKpi = { ...kpi };
+    const snapshotFilters = {
+        startDate, 
+        endDate, 
+        types: [...selectedTypes], 
+        status: selectedStatus, 
+        bankAccount: selectedBank,
+        movement: selectedMovement,
+        client: selectedClient,
+        dateContext: dateLabelMap[dateFilterType],
+        sortField,
+        sortDirection
+    };
+
     setTimeout(() => {
       try {
+        if (snapshotData.length === 0) {
+          alert('Nenhum registro encontrado com os filtros aplicados. Ajuste os filtros e tente novamente.');
+          return;
+        }
         ReportService.generatePDF(
-          filteredData, 
-          kpi, 
-          { 
-              startDate, 
-              endDate, 
-              types: selectedTypes, 
-              status: selectedStatus, 
-              bankAccount: selectedBank,
-              movement: selectedMovement,
-              client: selectedClient,
-              dateContext: dateLabelMap[dateFilterType],
-              sortField,
-              sortDirection
-          },
+          snapshotData, 
+          snapshotKpi, 
+          snapshotFilters,
           AuthService.getCurrentUser()
         );
       } catch (err) {
@@ -505,7 +531,7 @@ const Reports: React.FC = () => {
                              <label className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-400 mb-1"><Landmark className="h-4 w-4" /> Conta Bancária</label>
                              <select className="w-full form-select rounded-lg border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-blue-500 focus:border-blue-500" value={selectedBank} onChange={(e) => setSelectedBank(e.target.value)}>
                                 <option value="">Todas</option>
-                                {BANK_ACCOUNTS.map(b => <option key={b} value={b}>{b}</option>)}
+                                {availableBanks.map(b => <option key={b} value={b}>{b}</option>)}
                              </select>
                         </div>
                         <div>
