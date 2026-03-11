@@ -117,7 +117,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Sidebar - Hidden on Print - Updated to Royal Blue Theme */}
       <aside 
         className={`
-          fixed lg:static inset-y-0 left-0 z-50 w-64 bg-royal-950 dark:bg-slate-900 text-white transform transition-transform duration-200 ease-in-out print:hidden shadow-xl
+          fixed lg:static inset-y-0 left-0 z-50 w-64 bg-royal-950 dark:bg-slate-900 text-white transition-transform duration-200 ease-in-out print:hidden shadow-xl
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'} flex flex-col border-r border-royal-900 dark:border-slate-800
         `}
       >
@@ -155,29 +155,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
               return (
-                <button
+                <a
                   key={item.path}
-                  type="button"
+                  href={`#${item.path}`}
                   onClick={(e) => {
                     e.preventDefault();
-                    e.stopPropagation();
-                    console.log('Navigating to:', item.path);
-                    try {
-                      navigate(item.path);
-                    } catch (err) {
-                      // Fallback for Safari
-                      window.location.hash = '#' + item.path;
-                    }
-                    // Safari fallback: force hash change if navigate didn't work
-                    setTimeout(() => {
-                      if (window.location.hash !== '#' + item.path) {
-                        window.location.hash = '#' + item.path;
-                      }
-                    }, 100);
+                    navigate(item.path);
                     setIsSidebarOpen(false);
                   }}
                   className={`
-                    w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl transition-all duration-200 cursor-pointer relative z-10
+                    w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl transition-all duration-200 cursor-pointer no-underline
                     ${isActive 
                         ? 'bg-royal-800 dark:bg-blue-900/50 text-white shadow-md border border-royal-700/50' 
                         : 'text-royal-200 dark:text-slate-400 hover:bg-royal-900/50 dark:hover:bg-slate-800 hover:text-white'}
@@ -185,7 +172,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 >
                   <Icon className={`h-5 w-5 ${isActive ? 'text-white' : 'text-royal-300 dark:text-slate-500'}`} />
                   <span className="font-medium">{item.label}</span>
-                </button>
+                </a>
               );
             })}
           </nav>
@@ -206,7 +193,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           <button 
             type="button"
             onClick={handleLogout}
-            className="w-full flex items-center space-x-3 px-4 py-3 text-royal-300 dark:text-slate-400 hover:text-white hover:bg-royal-900 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer relative z-10"
+            className="w-full flex items-center space-x-3 px-4 py-3 text-royal-300 dark:text-slate-400 hover:text-white hover:bg-royal-900 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <LogOut className="h-5 w-5" />
             <span>Sair</span>
@@ -215,9 +202,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile Header - Hidden on Print */}
-        <header className="lg:hidden flex items-center justify-between px-4 h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 print:hidden transition-colors relative z-20">
+        <header className="lg:hidden flex items-center justify-between px-4 h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 print:hidden transition-colors">
           <button onClick={() => setIsSidebarOpen(true)} className="text-royal-800 dark:text-slate-300 cursor-pointer p-1" type="button">
             <Menu className="h-6 w-6" />
           </button>
@@ -230,7 +217,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           <ThemeToggle />
         </header>
 
-        <main className="flex-1 overflow-auto p-4 lg:p-8 bg-slate-50/50 dark:bg-slate-950/50 print:bg-white print:p-0 transition-colors relative z-0">
+        <main className="flex-1 overflow-auto p-4 lg:p-8 bg-slate-50/50 dark:bg-slate-950/50 print:bg-white print:p-0 transition-colors">
           <div className="max-w-7xl mx-auto">
             
             {/* Global Financial Header Summary */}
