@@ -96,22 +96,26 @@ const KEYWORD_FALLBACK_MAP: [string[], string][] = [
 ];
 
 const normalizeDescription = (desc: string): string => {
-  if (!desc) return desc;
-  const key = desc.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-  
-  // 1. Exact match or prefix match against the map
-  for (const [wrong, correct] of Object.entries(DESCRIPTION_NORMALIZATION_MAP)) {
-    const wrongNorm = wrong.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (key === wrongNorm) return correct;
-    if (key.startsWith(wrongNorm)) return correct;
+  try {
+    if (!desc || typeof desc !== 'string') return desc || '';
+    const key = desc.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    
+    // 1. Exact match or prefix match against the map
+    for (const [wrong, correct] of Object.entries(DESCRIPTION_NORMALIZATION_MAP)) {
+      const wrongNorm = wrong.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (key === wrongNorm) return correct;
+      if (key.startsWith(wrongNorm)) return correct;
+    }
+    
+    // 2. Keyword-based fallback: se o texto contém TODAS as keywords do grupo, normaliza
+    for (const [keywords, correct] of KEYWORD_FALLBACK_MAP) {
+      if (keywords.every(kw => key.includes(kw))) return correct;
+    }
+    
+    return desc;
+  } catch (e) {
+    return desc || '';
   }
-  
-  // 2. Keyword-based fallback: se o texto contém TODAS as keywords do grupo, normaliza
-  for (const [keywords, correct] of KEYWORD_FALLBACK_MAP) {
-    if (keywords.every(kw => key.includes(kw))) return correct;
-  }
-  
-  return desc;
 };
 
 export const DataService = {
@@ -162,46 +166,49 @@ export const DataService = {
             }
 
             // Apply exclusions + description normalization
-            const excludedIds = JSON.parse(localStorage.getItem('excluded_transactions') || '[]');
+            let excludedIds: string[] = [];
+            try { excludedIds = JSON.parse(localStorage.getItem('excluded_transactions') || '[]'); } catch(e) { /* Safari private mode */ }
             data.forEach(t => {
-              if (excludedIds.includes(t.id)) {
-                t.isExcluded = true;
-              }
-              // Sanitize: Pendente entries should NOT have paymentDate
-              if (t.status === 'Pendente' && t.paymentDate) {
-                t.paymentDate = '';
-              }
-              // ★ Normalizar status: "Sim", "Recebido", "Quitado", "OK", "Liquidado" → "Pago"
-              if (t.status) {
-                const sLower = (t.status as string).toLowerCase().trim();
-                if (['sim', 'recebido', 'quitado', 'ok', 'liquidado', 's'].includes(sLower)) {
-                  t.status = 'Pago';
-                } else if (['pago'].includes(sLower)) {
-                  t.status = 'Pago';
-                } else if (['pendente', 'nao', 'não', 'n', 'aberto', 'em aberto', ''].includes(sLower)) {
+              try {
+                if (excludedIds.includes(t.id)) {
+                  t.isExcluded = true;
+                }
+                // ★ Normalizar status: "Sim", "Recebido", "Quitado", "OK", "Liquidado" → "Pago"
+                if (t.status != null) {
+                  const sLower = String(t.status).toLowerCase().trim();
+                  if (['sim', 'recebido', 'quitado', 'ok', 'liquidado', 's'].includes(sLower)) {
+                    t.status = 'Pago';
+                  } else if (sLower === 'pago') {
+                    t.status = 'Pago';
+                  } else if (['pendente', 'nao', 'não', 'n', 'aberto', 'em aberto', ''].includes(sLower)) {
+                    t.status = 'Pendente';
+                  } else if (['agendado', 'programado'].includes(sLower)) {
+                    t.status = 'Agendado';
+                  }
+                } else {
                   t.status = 'Pendente';
-                } else if (['agendado', 'programado'].includes(sLower)) {
-                  t.status = 'Agendado';
                 }
-              }
-              // Re-check paymentDate after status normalization
-              if (t.status === 'Pendente' && t.paymentDate) {
-                t.paymentDate = '';
-              }
-              // Normalizar nomes de movimentação/descrição incorretos
-              if (t.description) {
-                t.description = normalizeDescription(t.description);
-              }
-              // Também normalizar o campo client quando for uma saída (favorecido)
-              if (t.client) {
-                const clientNorm = normalizeDescription(t.client);
-                if (clientNorm !== t.client) {
-                  t.client = clientNorm;
+                // Sanitize: Pendente entries should NOT have paymentDate
+                if (t.status === 'Pendente' && t.paymentDate) {
+                  t.paymentDate = '';
                 }
-              }
-              // Normalizar observacaoAPagar (pode ter nomes traduzidos também)
-              if (t.observacaoAPagar) {
-                t.observacaoAPagar = normalizeDescription(t.observacaoAPagar);
+                // Normalizar nomes de movimentação/descrição incorretos
+                if (t.description && typeof t.description === 'string') {
+                  t.description = normalizeDescription(t.description);
+                }
+                // Também normalizar o campo client quando for uma saída (favorecido)
+                if (t.client && typeof t.client === 'string') {
+                  const clientNorm = normalizeDescription(t.client);
+                  if (clientNorm !== t.client) {
+                    t.client = clientNorm;
+                  }
+                }
+                // Normalizar observacaoAPagar (pode ter nomes traduzidos também)
+                if (t.observacaoAPagar && typeof t.observacaoAPagar === 'string') {
+                  t.observacaoAPagar = normalizeDescription(t.observacaoAPagar);
+                }
+              } catch (normErr) {
+                console.warn('[DataService] Erro ao normalizar transação:', t.id, normErr);
               }
             });
 
