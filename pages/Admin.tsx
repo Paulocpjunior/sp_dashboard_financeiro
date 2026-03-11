@@ -6,7 +6,7 @@ import { BackendService } from '../services/backendService';
 import { DataService } from '../services/dataService';
 import { User as UserType } from '../types';
 import { MOCK_USERS, APPS_SCRIPT_URL } from '../constants';
-import { collection, getDocs, writeBatch, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../services/firebaseConfig';
 
 
@@ -21,6 +21,14 @@ interface PendingUser {
   status: string;
   role: string;
 }
+
+// Helper: SHA-256 hash
+const sha256 = async (message: string): Promise<string> => {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+};
 
 const Admin: React.FC = () => {
   const [users, setUsers] = useState<UserType[]>([]);
@@ -86,7 +94,7 @@ const Admin: React.FC = () => {
     }
   };
 
-  // Carregar todos os usuários do Apps Script
+  // Carregar todos os usuários do Firestore
   const loadAllUsers = async () => {
     // Se estiver em modo Mock, usa MOCK_USERS diretamente
     if (DataService.isMockMode) {
@@ -95,25 +103,41 @@ const Admin: React.FC = () => {
     }
 
     try {
-      const response = await fetch(APPS_SCRIPT_URL + '?action=usuarios');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.success && data.usuarios) {
-          // Filtrar apenas usuários aprovados/ativos (mas pode incluir inativos para gestão)
-          const allUsers = data.usuarios.filter((u: any) => u.status === 'Aprovado' || u.active !== undefined);
-          setUsers(allUsers);
-        } else {
-             // Se não retornar usuários ou success false, tenta fallback
-             throw new Error("Formato inválido ou sem usuários");
-        }
-      } else {
-          throw new Error("Erro na requisição");
-      }
+      // ★ Busca direto do Firestore (fonte de verdade)
+      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(usersRef);
+      const firestoreUsers: UserType[] = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          username: (data.username || data.name || '').toLowerCase().trim(),
+          name: data.name || data.username || '',
+          role: (data.role || 'operacional').toLowerCase().trim() as any,
+          active: data.active !== false,
+          email: data.email || '',
+          passwordHash: data.passwordHash || data.password_hash || '',
+          lastAccess: data.lastAccess || '',
+        };
+      });
+      setUsers(firestoreUsers);
     } catch (error) {
-      console.warn('Falha ao carregar usuários do backend. Usando fallback local.', error);
-      // Fallback para MOCK_USERS se API falhar, para não quebrar a tela
-      const userData = await BackendService.fetchUsers();
-      setUsers(userData);
+      console.warn('Falha ao carregar usuários do Firestore. Tentando fallback...', error);
+      try {
+        // Fallback: tenta Apps Script
+        const response = await fetch(APPS_SCRIPT_URL + '?action=usuarios');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.usuarios) {
+            const allUsers = data.usuarios.filter((u: any) => u.status === 'Aprovado' || u.active !== undefined);
+            setUsers(allUsers);
+            return;
+          }
+        }
+        throw new Error("Apps Script fallback também falhou");
+      } catch (fallbackError) {
+        console.warn('Fallback para MOCK_USERS', fallbackError);
+        setUsers(MOCK_USERS);
+      }
     }
   };
 
@@ -242,22 +266,21 @@ const Admin: React.FC = () => {
     const newStatus = !user.active;
     const actionName = newStatus ? 'Desbloquear' : 'Bloquear';
     
-    if (!confirm(`Tem certeza que deseja ${actionName.toUpperCase()} o usuário "${user.username}"?`)) return;
+    if (!confirm(`Tem certeza que deseja ${actionName.toUpperCase()} o usuário "${user.name || user.username}"?`)) return;
 
     // Atualização Otimista
     setUsers(prev => prev.map(u => u.id === user.id ? { ...u, active: newStatus } : u));
 
     try {
-      const result = await BackendService.toggleUserStatus(user.username, newStatus);
-      if (!result.success) {
-        alert('Erro ao atualizar status: ' + result.message);
-        // Reverter
-        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, active: !newStatus } : u));
-      } else {
-        alert(`Usuário ${newStatus ? 'desbloqueado' : 'bloqueado'} com sucesso!`);
-      }
+      // ★ Atualiza direto no Firestore
+      const userRef = doc(db, 'users', user.id);
+      await updateDoc(userRef, { active: newStatus });
+      alert(`Usuário ${newStatus ? 'desbloqueado' : 'bloqueado'} com sucesso!`);
     } catch (error) {
-      alert('Erro de conexão ao atualizar status.');
+      console.error('Erro ao atualizar status no Firestore:', error);
+      alert('Erro ao atualizar status.');
+      // Reverter
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, active: !newStatus } : u));
     }
   };
 
@@ -278,19 +301,17 @@ const Admin: React.FC = () => {
 
     setIsSavingPass(true);
     try {
-      const result = await BackendService.adminChangePassword(selectedUserForPass.username, newAdminPassword);
-      if (result.success) {
-        alert('Senha alterada com sucesso!');
-        setShowChangePassModal(false);
-        setNewAdminPassword('');
-        setSelectedUserForPass(null);
-      } else {
-        alert('Erro ao alterar senha: ' + result.message);
-      }
+      // ★ Atualiza senha direto no Firestore
+      const passwordHash = await sha256(newAdminPassword);
+      const userRef = doc(db, 'users', selectedUserForPass.id);
+      await updateDoc(userRef, { passwordHash });
+      alert('Senha alterada com sucesso!');
+      setShowChangePassModal(false);
+      setNewAdminPassword('');
+      setSelectedUserForPass(null);
     } catch (error) {
-       // Em caso de fallback/erro de rede, assumimos sucesso para UX
-       alert('Solicitação de troca de senha enviada com sucesso!');
-       setShowChangePassModal(false);
+      console.error('Erro ao alterar senha no Firestore:', error);
+      alert('Erro ao alterar senha. Tente novamente.');
     } finally {
       setIsSavingPass(false);
     }
@@ -301,8 +322,8 @@ const Admin: React.FC = () => {
     setCreateUserMessage(null);
 
     // Validações
-    if (!newUserForm.name || !newUserForm.email || !newUserForm.username || !newUserForm.password) {
-      setCreateUserMessage({ type: 'error', text: 'Preencha todos os campos obrigatórios.' });
+    if (!newUserForm.name || !newUserForm.username || !newUserForm.password) {
+      setCreateUserMessage({ type: 'error', text: 'Preencha Nome, Username e Senha.' });
       return;
     }
 
@@ -318,77 +339,56 @@ const Admin: React.FC = () => {
 
     setIsCreatingUser(true);
 
-    const payload = {
-      action: 'register',
-      name: newUserForm.name,
-      email: newUserForm.email,
-      phone: newUserForm.phone,
-      username: newUserForm.username.toLowerCase().replace(/\s/g, ''),
-      password: newUserForm.password,
-      role: newUserForm.role,
-    };
-
     try {
-      // Tentar com fetch normal primeiro
-      const response = await fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        redirect: 'follow',
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setCreateUserMessage({ type: 'success', text: result.message });
-        setTimeout(() => {
-          setShowNewUserModal(false);
-          setNewUserForm({
-            name: '',
-            email: '',
-            phone: '',
-            username: '',
-            password: '',
-            confirmPassword: '',
-            role: 'operacional'
-          });
-          setCreateUserMessage(null);
-          loadPendingUsers();
-        }, 2000);
-      } else {
-        setCreateUserMessage({ type: 'error', text: result.message });
-      }
-    } catch (error: any) {
-      console.log('Tentando modo no-cors...');
+      const username = newUserForm.username.toLowerCase().replace(/\s/g, '');
       
-      // Fallback: usar no-cors (não retorna resposta, mas envia os dados)
-      try {
-        await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        
-        // Assumir sucesso e mostrar mensagem
-        setCreateUserMessage({ type: 'success', text: 'Cadastro enviado! Aguarde a aprovação.' });
-        setTimeout(() => {
-          setShowNewUserModal(false);
-          setNewUserForm({
-            name: '',
-            email: '',
-            phone: '',
-            username: '',
-            password: '',
-            confirmPassword: '',
-            role: 'operacional'
-          });
-          setCreateUserMessage(null);
-          loadPendingUsers();
-        }, 2000);
-      } catch (noCorsError) {
-        setCreateUserMessage({ type: 'error', text: 'Erro de conexão. Tente novamente.' });
+      // Verificar se username já existe no Firestore
+      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(usersRef);
+      const existing = snapshot.docs.find(d => {
+        const data = d.data();
+        return (data.username || '').toLowerCase().trim() === username;
+      });
+      if (existing) {
+        setCreateUserMessage({ type: 'error', text: 'Username já existe. Escolha outro.' });
+        setIsCreatingUser(false);
+        return;
       }
+
+      // ★ Criar direto no Firestore
+      const passwordHash = await sha256(newUserForm.password);
+      const newUserDoc = {
+        name: newUserForm.name,
+        email: newUserForm.email || '',
+        phone: newUserForm.phone || '',
+        username: username,
+        passwordHash: passwordHash,
+        role: newUserForm.role || 'operacional',
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
+
+      const newDocRef = doc(collection(db, 'users'));
+      await setDoc(newDocRef, newUserDoc);
+
+      setCreateUserMessage({ type: 'success', text: `Usuário "${newUserForm.name}" criado com sucesso!` });
+      setTimeout(() => {
+        setShowNewUserModal(false);
+        setNewUserForm({
+          name: '',
+          email: '',
+          phone: '',
+          username: '',
+          password: '',
+          confirmPassword: '',
+          role: 'operacional'
+        });
+        setCreateUserMessage(null);
+        loadAllUsers(); // Recarrega lista
+      }, 1500);
+    } catch (error: any) {
+      console.error('Erro ao criar usuário no Firestore:', error);
+      setCreateUserMessage({ type: 'error', text: 'Erro ao criar usuário. Tente novamente.' });
     } finally {
       setIsCreatingUser(false);
     }
