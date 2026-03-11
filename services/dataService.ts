@@ -1,4 +1,3 @@
-
 import { FilterState, KPIData, PaginatedResult, Transaction } from '../types';
 import { BackendService } from './backendService';
 import { FirebaseService } from './firebaseService';
@@ -191,6 +190,15 @@ export const DataService = {
                 // Sanitize: Pendente entries should NOT have paymentDate
                 if (t.status === 'Pendente' && t.paymentDate) {
                   t.paymentDate = '';
+                }
+                // ★ FIX: Normalizar campo movement (Saida→Saída, entrada→Entrada)
+                if (t.movement) {
+                  const mLower = String(t.movement).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+                  if (mLower === 'entrada' || mLower === 'receita' || mLower === 'credito') {
+                    t.movement = 'Entrada';
+                  } else if (mLower === 'saida' || mLower === 'despesa' || mLower === 'debito') {
+                    t.movement = 'Saída';
+                  }
                 }
                 // Normalizar nomes de movimentação/descrição incorretos
                 if (t.description && typeof t.description === 'string') {
