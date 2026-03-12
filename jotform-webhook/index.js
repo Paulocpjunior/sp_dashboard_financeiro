@@ -10,32 +10,28 @@ app.use(express.urlencoded({ extended: true }));
 const SPREADSHEET_ID = '17mHd8eqKoj7Cl6E2MCkr0PczFj-lKv_vmFRCY5hypwg';
 const SHEET_NAME = 'Contas a Pagar';
 const PROJECT_ID = process.env.GCP_PROJECT_ID || 'gen-lang-client-0888019226';
-const FIRESTORE_API_KEY = process.env.FIRESTORE_API_KEY || '';
 
-function findField(body, candidates) {
-  const lowerBody = {};
-  for (const key of Object.keys(body)) {
-    lowerBody[key.toLowerCase().replace(/[^a-z0-9]/g, '')] = body[key];
+function parseJotformDate(val) {
+  if (!val) return null;
+  if (typeof val === 'object' && val.day) {
+    const { day, month, year } = val;
+    if (!day || !month || !year) return null;
+    return `${String(day).padStart(2,'0')}/${String(month).padStart(2,'0')}/${year}`;
   }
-  for (const c of candidates) {
-    const normalized = c.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (lowerBody[normalized] !== undefined) return lowerBody[normalized];
-  }
-  return null;
+  return val;
 }
 
-function parseDate(str) {
+function parseDateToObj(str) {
   if (!str) return null;
-  const parts = str.includes('/') ? str.split('/').reverse() : str.split('-');
-  return new Date(parts[0], parts[1] - 1, parts[2]);
+  const parts = str.includes('/') ? str.split('/') : str.split('-').reverse();
+  return new Date(parts[2], parts[1] - 1, parts[0]);
 }
 
 async function getSheetsClient() {
   const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
-  const authClient = await auth.getClient();
-  return google.sheets({ version: 'v4', auth: authClient });
+  return google.sheets({ version: 'v4', auth: await auth.getClient() });
 }
 
 async function findRowByMovimentacao(sheets, movimentacao, dataVenc) {
@@ -51,8 +47,8 @@ async function findRowByMovimentacao(sheets, movimentacao, dataVenc) {
     const searchMov = movimentacao.toString().trim().toLowerCase();
     if (cellMov === searchMov) {
       if (dataVenc && row[2]) {
-        const rowDate = parseDate(row[2]);
-        const vencDate = parseDate(dataVenc);
+        const rowDate = parseDateToObj(row[2]);
+        const vencDate = parseDateToObj(dataVenc);
         if (rowDate && vencDate && rowDate.toDateString() === vencDate.toDateString()) {
           return { rowIndex: i + 1, sheetRow: i };
         }
@@ -65,10 +61,9 @@ async function findRowByMovimentacao(sheets, movimentacao, dataVenc) {
 
 async function updateSheets(rowIndex, status, valorPago, dataPgto) {
   const sheets = await getSheetsClient();
-  const range = `${SHEET_NAME}!J${rowIndex}:L${rowIndex}`;
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range,
+    range: `${SHEET_NAME}!J${rowIndex}:L${rowIndex}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [[status, valorPago || '', dataPgto || '']] },
   });
@@ -77,91 +72,69 @@ async function updateSheets(rowIndex, status, valorPago, dataPgto) {
 
 async function updateFirestore(sheetRow, status, valorPago, dataPgto) {
   const docId = `trx-${sheetRow}`;
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}?key=${FIRESTORE_API_KEY}&updateMask.fieldPaths=pago&updateMask.fieldPaths=valorPago&updateMask.fieldPaths=dataPagamento`;
-  const body = {
-    fields: {
-      pago: { stringValue: status },
-      valorPago: { stringValue: valorPago ? String(valorPago) : '' },
-      dataPagamento: { stringValue: dataPgto || '' },
-    },
-  };
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}?updateMask.fieldPaths=pago&updateMask.fieldPaths=valorPago&updateMask.fieldPaths=dataPagamento`;
+  const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/datastore'] });
+  const token = await (await auth.getClient()).getAccessToken();
   const resp = await fetch(url, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.token}` },
+    body: JSON.stringify({
+      fields: {
+        pago: { stringValue: status },
+        valorPago: { stringValue: valorPago ? String(valorPago) : '' },
+        dataPagamento: { stringValue: dataPgto || '' },
+      },
+    }),
   });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Firestore PATCH falhou (${docId}): ${err}`);
-  }
+  if (!resp.ok) throw new Error(`Firestore PATCH falhou (${docId}): ${await resp.text()}`);
   console.log(`Firestore atualizado: ${docId}`);
 }
 
-// Middleware que unifica body de qualquer formato
-function parseBody(req) {
-  let body = req.body || {};
-  // multer coloca em req.fields para multipart
-  if (req.fields) {
-    for (const [k, v] of Object.entries(req.fields)) {
-      body[k] = Array.isArray(v) ? v[0] : v;
-    }
-  }
-  return body;
-}
-
-app.post('/debug', upload.any(), (req, res) => {
-  const allFields = {};
-  if (req.body) Object.assign(allFields, req.body);
-  if (req.fields) Object.assign(allFields, req.fields);
-  if (req.files) req.files.forEach(f => { allFields[f.fieldname] = f.originalname; });
-  console.log('DEBUG COMPLETO:', JSON.stringify(allFields, null, 2));
-  res.json({ received: allFields });
-});
-
 app.post('/', upload.any(), async (req, res) => {
-  // Unifica todos os campos independente do content-type
-  const body = {};
-  if (req.body) Object.assign(body, req.body);
-  if (req.files) req.files.forEach(f => { body[f.fieldname] = f.originalname; });
-
-  console.log('Webhook recebido - campos:', JSON.stringify(body));
-
   try {
-    const docPago = findField(body, ['docpago','doc_pago','docPago','q6_docPago','q7_docPago','q5_docPago','q8_docPago']);
-    const movimentacao = findField(body, ['movimentacao','movimentação','q3_movimentacao','q2_movimentacao','q4_movimentacao','lancamentodedespesas']);
-    const valorRef = findField(body, ['valorRef','valor_ref','valorRefValorOriginal','q8_valorRef','valorOriginal','valorrefvalororiginal']);
-    const dataAPagar = findField(body, ['dataAPagar','data_a_pagar','dataapaagar','dataPagar','q5_dataA','dataapagar']);
-    const dataLancamento = findField(body, ['dataLancamento','data_lancamento','q4_dataLancamento']);
+    // JotForm envia dados reais dentro de rawRequest como string JSON
+    const topBody = req.body || {};
+    let raw = {};
+    if (topBody.rawRequest) {
+      try { raw = JSON.parse(topBody.rawRequest); } catch(e) { raw = {}; }
+    }
+
+    const docPago = (raw.q291_docpago || '').toString().toUpperCase().trim();
+    const movimentacao = (raw.q44_movimentacao44 || '').toString().trim();
+    const valorRef = raw.q56_valorRefvalor56 || raw.q57_valorPago || '';
+    const dataAPagar = parseJotformDate(raw.q313_dataA);
+    const dataBaixa = parseJotformDate(raw.q129_dataBaixa);
 
     console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar });
 
-    if (!docPago || docPago.toString().toUpperCase().trim() !== 'SIM') {
+    if (docPago !== 'SIM') {
       console.log('Ignorado: Doc.Pago =', docPago);
       return res.status(200).json({ status: 'ignored', docPago });
     }
     if (!movimentacao) {
-      console.error('Movimentacao ausente. Campos recebidos:', Object.keys(body));
-      return res.status(400).json({ error: 'Campo Movimentacao ausente', fields: Object.keys(body) });
+      console.error('Movimentacao ausente');
+      return res.status(400).json({ error: 'Movimentacao ausente' });
     }
 
     const sheets = await getSheetsClient();
     const match = await findRowByMovimentacao(sheets, movimentacao, dataAPagar);
-
     if (!match) {
       console.error('Nao encontrado:', movimentacao);
       return res.status(404).json({ error: 'Movimentacao nao encontrada', movimentacao });
     }
 
-    const dataPgto = dataAPagar || dataLancamento || new Date().toLocaleDateString('pt-BR');
+    const dataPgto = dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR');
 
     await Promise.all([
       updateSheets(match.rowIndex, 'Pago', valorRef, dataPgto),
       updateFirestore(match.sheetRow, 'Pago', valorRef, dataPgto),
     ]);
 
-    return res.status(200).json({ status: 'success', movimentacao, rowIndex: match.rowIndex, docId: `trx-${match.sheetRow}` });
+    console.log(`SUCESSO: ${movimentacao} → linha ${match.rowIndex}`);
+    return res.status(200).json({ status: 'success', movimentacao, rowIndex: match.rowIndex });
+
   } catch (err) {
-    console.error('Erro:', err);
+    console.error('Erro:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
