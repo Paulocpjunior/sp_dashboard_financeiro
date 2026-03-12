@@ -8,7 +8,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const SPREADSHEET_ID = '17mHd8eqKoj7Cl6E2MCkr0PczFj-lKv_vmFRCY5hypwg';
-const SHEET_NAME = 'Formulário Controle de Caixa';
+const SHEET_NAME = 'Formulário de Controle de Caixa';
 const PROJECT_ID = process.env.GCP_PROJECT_ID || 'gen-lang-client-0888019226';
 
 function parseJotformDate(val) {
