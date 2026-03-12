@@ -37,7 +37,7 @@ async function getSheetsClient() {
 async function findRowByMovimentacao(sheets, movimentacao, dataVenc) {
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!A:K`,
+    range: `'${SHEET_NAME}'!A:K`,
   });
   const rows = resp.data.values || [];
   const matchingRows = [];
@@ -63,7 +63,7 @@ async function updateSheets(rowIndex, status, valorPago, dataPgto) {
   const sheets = await getSheetsClient();
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${SHEET_NAME}!J${rowIndex}:L${rowIndex}`,
+    range: `'${SHEET_NAME}'!J${rowIndex}:L${rowIndex}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [[status, valorPago || '', dataPgto || '']] },
   });
