@@ -1,7 +1,9 @@
 const express = require('express');
 const { google } = require('googleapis');
+const multer = require('multer');
 
 const app = express();
+const upload = multer();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -95,22 +97,43 @@ async function updateFirestore(sheetRow, status, valorPago, dataPgto) {
   console.log(`Firestore atualizado: ${docId}`);
 }
 
-app.post('/debug', (req, res) => {
-  console.log('DEBUG PAYLOAD:', JSON.stringify(req.body, null, 2));
-  res.json({ received: req.body });
+// Middleware que unifica body de qualquer formato
+function parseBody(req) {
+  let body = req.body || {};
+  // multer coloca em req.fields para multipart
+  if (req.fields) {
+    for (const [k, v] of Object.entries(req.fields)) {
+      body[k] = Array.isArray(v) ? v[0] : v;
+    }
+  }
+  return body;
+}
+
+app.post('/debug', upload.any(), (req, res) => {
+  const allFields = {};
+  if (req.body) Object.assign(allFields, req.body);
+  if (req.fields) Object.assign(allFields, req.fields);
+  if (req.files) req.files.forEach(f => { allFields[f.fieldname] = f.originalname; });
+  console.log('DEBUG COMPLETO:', JSON.stringify(allFields, null, 2));
+  res.json({ received: allFields });
 });
 
-app.post('/', async (req, res) => {
-  console.log('Webhook recebido:', JSON.stringify(req.body));
+app.post('/', upload.any(), async (req, res) => {
+  // Unifica todos os campos independente do content-type
+  const body = {};
+  if (req.body) Object.assign(body, req.body);
+  if (req.files) req.files.forEach(f => { body[f.fieldname] = f.originalname; });
+
+  console.log('Webhook recebido - campos:', JSON.stringify(body));
+
   try {
-    const body = req.body;
-    const docPago = findField(body, ['docpago','doc_pago','docPago','q6_docPago','q7_docPago','q5_docPago']);
-    const movimentacao = findField(body, ['movimentacao','movimentacao','q3_movimentacao','q2_movimentacao','q4_movimentacao','lancamentodedespesas']);
-    const valorRef = findField(body, ['valorRef','valor_ref','valorRefValorOriginal','q8_valorRef','valorOriginal']);
-    const dataAPagar = findField(body, ['dataAPagar','data_a_pagar','dataapaagar','dataPagar','q5_dataA']);
+    const docPago = findField(body, ['docpago','doc_pago','docPago','q6_docPago','q7_docPago','q5_docPago','q8_docPago']);
+    const movimentacao = findField(body, ['movimentacao','movimentação','q3_movimentacao','q2_movimentacao','q4_movimentacao','lancamentodedespesas']);
+    const valorRef = findField(body, ['valorRef','valor_ref','valorRefValorOriginal','q8_valorRef','valorOriginal','valorrefvalororiginal']);
+    const dataAPagar = findField(body, ['dataAPagar','data_a_pagar','dataapaagar','dataPagar','q5_dataA','dataapagar']);
     const dataLancamento = findField(body, ['dataLancamento','data_lancamento','q4_dataLancamento']);
 
-    console.log('Campos:', { docPago, movimentacao, valorRef, dataAPagar });
+    console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar });
 
     if (!docPago || docPago.toString().toUpperCase().trim() !== 'SIM') {
       console.log('Ignorado: Doc.Pago =', docPago);
