@@ -43,7 +43,7 @@ async function findRowByMovimentacao(sheets, movimentacao, dataVenc) {
   const matchingRows = [];
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
-    const cellMov = (row[4] || '').toString().trim().toLowerCase();
+    const cellMov = (row[5] || '').toString().trim().toLowerCase();
     const searchMov = movimentacao.toString().trim().toLowerCase();
     if (cellMov === searchMov) {
       if (dataVenc && row[2]) {
@@ -63,9 +63,9 @@ async function updateSheets(rowIndex, status, valorPago, dataPgto) {
   const sheets = await getSheetsClient();
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `'${SHEET_NAME}'!J${rowIndex}:L${rowIndex}`,
+    range: `'${SHEET_NAME}'!J${rowIndex}:N${rowIndex}`,
     valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[status, valorPago || '', dataPgto || '']] },
+    requestBody: { values: [[status, dataPgto || '', '', '', valorPago || '']] },
   });
   console.log(`Sheets atualizado: linha ${rowIndex}`);
 }
