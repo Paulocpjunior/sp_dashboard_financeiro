@@ -498,7 +498,7 @@ function parseCurrency(val: string | undefined): number {
 function normalizeStatus(val: string | undefined): 'Pago' | 'Pendente' | 'Agendado' {
   if (!val) return 'Pendente';
   const v = val.toLowerCase().trim();
-  if (v === 'sim' || v === 'pago' || v === 'ok' || v === 'liquidado' || v === 'recebido') return 'Pago';
+  if (v === 'sim' || v === 'pago' || v === 'ok' || v === 'liquidado' || v === 'recebido' || v.includes('baixad')) return 'Pago';
   if (v === 'não' || v === 'nao' || v === 'pendente' || v === 'aberto') return 'Pendente';
   if (v.includes('agenda')) return 'Agendado';
   return 'Pendente';
