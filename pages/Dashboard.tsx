@@ -169,9 +169,13 @@ const Dashboard: React.FC = () => {
     // Iniciar auto-refresh
     DataService.startAutoRefresh();
 
+    // ★ Iniciar listener em tempo real do Firebase (onSnapshot)
+    const stopFirebaseListener = DataService.subscribeToFirebaseChanges();
+
     return () => {
       unsubscribe();
       DataService.stopAutoRefresh();
+      stopFirebaseListener();
     };
   }, [isLoading, initError]);
 
