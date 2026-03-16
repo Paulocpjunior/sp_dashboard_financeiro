@@ -2,6 +2,8 @@ import { FilterState, KPIData, PaginatedResult, Transaction } from '../types';
 import { BackendService } from './backendService';
 import { FirebaseService } from './firebaseService';
 import { MOCK_TRANSACTIONS, DATA_SOURCE } from '../constants';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db } from './firebaseConfig';
 
 // In-memory cache
 let CACHED_TRANSACTIONS: Transaction[] = [];
@@ -18,6 +20,9 @@ let autoRefreshListeners: Array<() => void> = [];
 
 // Constante de Refresh (2 minutos para evitar excesso de requisições)
 const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+
+// Firebase real-time listener
+let firebaseUnsubscribe: (() => void) | null = null;
 
 // Normalização de texto auxiliar
 const normalizeText = (text: string) => {
@@ -333,6 +338,130 @@ export const DataService = {
     if (autoRefreshTimer) {
         clearInterval(autoRefreshTimer);
         autoRefreshTimer = null;
+    }
+  },
+
+  /**
+   * Inicia listener em tempo real do Firebase (onSnapshot).
+   * Qualquer alteração no Firestore atualiza o cache automaticamente e notifica a UI.
+   */
+  subscribeToFirebaseChanges: (): (() => void) => {
+    if (isMockMode || DATA_SOURCE !== 'firebase') return () => {};
+
+    // Evita múltiplos listeners simultâneos
+    if (firebaseUnsubscribe) {
+      firebaseUnsubscribe();
+      firebaseUnsubscribe = null;
+    }
+
+    console.log('[DataService] 🔴 Iniciando listener em tempo real do Firebase (onSnapshot)...');
+
+    const q = query(collection(db, 'transactions'), orderBy('date', 'desc'));
+    let isFirstSnapshot = true;
+
+    firebaseUnsubscribe = onSnapshot(q, (snapshot) => {
+      // Ignora o primeiro snapshot (dados já carregados pelo loadData)
+      if (isFirstSnapshot) {
+        isFirstSnapshot = false;
+        console.log(`[DataService] onSnapshot: snapshot inicial ignorado (${snapshot.size} docs)`);
+        return;
+      }
+
+      if (!isDataLoaded) return;
+
+      const changes = snapshot.docChanges();
+      console.log(`[DataService] 🔴 Firebase onSnapshot: ${changes.length} alterações detectadas`);
+
+      if (changes.length === 0) return;
+
+      // Aplica as alterações diretamente no cache
+      let excludedIds: string[] = [];
+      try { excludedIds = JSON.parse(localStorage.getItem('excluded_transactions') || '[]'); } catch(e) { /* */ }
+
+      for (const change of changes) {
+        const docData = { id: change.doc.id, ...change.doc.data() } as Transaction;
+
+        // Normalizar status
+        try {
+          if (docData.status != null) {
+            const sLower = String(docData.status).toLowerCase().trim();
+            if (['sim', 'recebido', 'quitado', 'ok', 'liquidado', 's'].includes(sLower)) {
+              docData.status = 'Pago';
+            } else if (sLower === 'pago') {
+              docData.status = 'Pago';
+            } else if (['pendente', 'nao', 'não', 'n', 'aberto', 'em aberto', ''].includes(sLower)) {
+              docData.status = 'Pendente';
+            } else if (['agendado', 'programado'].includes(sLower)) {
+              docData.status = 'Agendado';
+            }
+          } else {
+            docData.status = 'Pendente';
+          }
+          if (docData.status === 'Pendente' && docData.paymentDate) {
+            docData.paymentDate = '';
+          }
+          if (docData.movement) {
+            const mLower = String(docData.movement).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            if (mLower === 'entrada' || mLower === 'receita' || mLower === 'credito') {
+              docData.movement = 'Entrada';
+            } else if (mLower === 'saida' || mLower === 'despesa' || mLower === 'debito') {
+              docData.movement = 'Saída';
+            }
+          }
+          if (docData.description && typeof docData.description === 'string') {
+            docData.description = normalizeDescription(docData.description);
+          }
+          if (docData.client && typeof docData.client === 'string') {
+            docData.client = normalizeDescription(docData.client);
+          }
+          if (excludedIds.includes(docData.id)) {
+            docData.isExcluded = true;
+          }
+        } catch (normErr) {
+          console.warn('[DataService] Erro ao normalizar onSnapshot:', docData.id, normErr);
+        }
+
+        if (change.type === 'added') {
+          // Novo documento — adiciona se não existe
+          const exists = CACHED_TRANSACTIONS.findIndex(t => t.id === docData.id);
+          if (exists === -1) {
+            CACHED_TRANSACTIONS.unshift(docData);
+          } else {
+            CACHED_TRANSACTIONS[exists] = docData;
+          }
+        } else if (change.type === 'modified') {
+          const idx = CACHED_TRANSACTIONS.findIndex(t => t.id === docData.id);
+          if (idx !== -1) {
+            CACHED_TRANSACTIONS[idx] = docData;
+          } else {
+            CACHED_TRANSACTIONS.unshift(docData);
+          }
+        } else if (change.type === 'removed') {
+          CACHED_TRANSACTIONS = CACHED_TRANSACTIONS.filter(t => t.id !== docData.id);
+        }
+      }
+
+      lastUpdatedAt = new Date();
+      console.log(`[DataService] 🔴 Cache atualizado em tempo real. Total: ${CACHED_TRANSACTIONS.length}`);
+      DataService.notifyListeners();
+    }, (error) => {
+      console.error('[DataService] Erro no onSnapshot:', error);
+    });
+
+    return () => {
+      if (firebaseUnsubscribe) {
+        firebaseUnsubscribe();
+        firebaseUnsubscribe = null;
+        console.log('[DataService] Firebase listener desconectado.');
+      }
+    };
+  },
+
+  stopFirebaseListener: (): void => {
+    if (firebaseUnsubscribe) {
+      firebaseUnsubscribe();
+      firebaseUnsubscribe = null;
+      console.log('[DataService] Firebase listener parado.');
     }
   },
 
