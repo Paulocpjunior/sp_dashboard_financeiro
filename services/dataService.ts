@@ -24,6 +24,38 @@ const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 // Firebase real-time listener
 let firebaseUnsubscribe: (() => void) | null = null;
 
+// Helper: converte Firestore Timestamp ou string de data em string YYYY-MM-DD
+function normalizeFirestoreDate(val: any): string {
+  if (!val) return '';
+  // Firestore Timestamp: { seconds, nanoseconds }
+  if (typeof val === 'object' && val !== null && 'seconds' in val) {
+    const d = new Date(val.seconds * 1000);
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString().substring(0, 10);
+  }
+  if (typeof val === 'string') {
+    if (val === '1970-01-01' || val === '[object Object]') return '';
+    // Já é ISO YYYY-MM-DD ou YYYY-MM-DDTHH...
+    const isoMatch = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      const y = parseInt(isoMatch[1], 10);
+      if (y < 1900 || y > 2100) return '';
+      return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    }
+    // BR format DD/MM/YYYY
+    const brMatch = val.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+    if (brMatch) {
+      let year = brMatch[3];
+      if (year.length === 2) year = '20' + year;
+      const y = parseInt(year, 10);
+      if (y < 1900 || y > 2100) return '';
+      return `${year}-${brMatch[2].padStart(2, '0')}-${brMatch[1].padStart(2, '0')}`;
+    }
+    return '';
+  }
+  return '';
+}
+
 // Normalização de texto auxiliar
 const normalizeText = (text: string) => {
   return text
@@ -196,6 +228,10 @@ export const DataService = {
                 if (t.status === 'Pendente' && t.paymentDate) {
                   t.paymentDate = '';
                 }
+                // ★ FIX: Normalizar campos de data (Firestore Timestamp → string YYYY-MM-DD)
+                t.date        = normalizeFirestoreDate(t.date)        || t.date;
+                t.dueDate     = normalizeFirestoreDate(t.dueDate)     || t.dueDate;
+                t.paymentDate = normalizeFirestoreDate(t.paymentDate) || t.paymentDate || '';
                 // ★ FIX: Normalizar campo movement (Saida→Saída, entrada→Entrada)
                 if (t.movement) {
                   const mLower = String(t.movement).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -400,6 +436,10 @@ export const DataService = {
           if (docData.status === 'Pendente' && docData.paymentDate) {
             docData.paymentDate = '';
           }
+          // ★ FIX: Normalizar campos de data (Firestore Timestamp → string YYYY-MM-DD)
+          docData.date        = normalizeFirestoreDate(docData.date)        || docData.date;
+          docData.dueDate     = normalizeFirestoreDate(docData.dueDate)     || docData.dueDate;
+          docData.paymentDate = normalizeFirestoreDate(docData.paymentDate) || docData.paymentDate || '';
           if (docData.movement) {
             const mLower = String(docData.movement).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             if (mLower === 'entrada' || mLower === 'receita' || mLower === 'credito') {

@@ -142,7 +142,19 @@ export const AlertsBanner: React.FC<AlertsBannerProps> = ({ transactions, onAler
               <div key={idx} className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 text-xs">
                 <div className="flex flex-col">
                   <span className="font-bold text-slate-800 dark:text-white truncate max-w-[120px]">{t.client}</span>
-                  <span className="text-[10px] text-slate-500">{new Date(t.dueDate).toLocaleDateString('pt-BR')}</span>
+                  <span className="text-[10px] text-slate-500">{(() => {
+                    try {
+                      const s: any = t.dueDate;
+                      if (!s) return '-';
+                      if (typeof s === 'object' && s !== null && 'seconds' in s) return new Date(s.seconds * 1000).toLocaleDateString('pt-BR');
+                      const p = String(s).split(/[-\/]/);
+                      if (p.length === 3) {
+                        const d = p[0].length === 4 ? new Date(+p[0], +p[1]-1, +p[2]) : new Date(+p[2], +p[1]-1, +p[0]);
+                        return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+                      }
+                      return '-';
+                    } catch { return '-'; }
+                  })()}</span>
                 </div>
                 <span className={`font-black ${t.movement === 'Saída' ? 'text-red-500' : 'text-emerald-500'}`}>
                   {formatCurrency(t.movement === 'Saída' ? t.valuePaid : (t.totalCobranca || t.valueReceived || 0))}

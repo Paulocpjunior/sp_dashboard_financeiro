@@ -386,13 +386,33 @@ const Reports: React.FC = () => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
-  const formatDate = (dateStr: string | undefined) => {
-    if (!dateStr || dateStr === '1970-01-01') return '-';
+  const formatDate = (dateStr: any) => {
+    if (!dateStr) return '-';
     try {
-        const date = new Date(dateStr);
-        const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-        const adjustedDate = new Date(date.getTime() + userTimezoneOffset);
-        return adjustedDate.toLocaleDateString('pt-BR');
+      let dateObj: Date;
+      // Suporte a Firestore Timestamp ({ seconds, nanoseconds })
+      if (typeof dateStr === 'object' && dateStr !== null && 'seconds' in dateStr) {
+        dateObj = new Date(dateStr.seconds * 1000);
+      } else if (typeof dateStr === 'string') {
+        if (dateStr === '1970-01-01') return '-';
+        // Parse manual para evitar distorção de timezone UTC
+        const parts = dateStr.split(/[-\/]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) {
+            // ISO: yyyy-mm-dd
+            dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+          } else {
+            // BR: dd/mm/yyyy
+            dateObj = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+          }
+        } else {
+          dateObj = new Date(dateStr);
+        }
+      } else {
+        dateObj = new Date(dateStr);
+      }
+      if (isNaN(dateObj.getTime())) return '-';
+      return dateObj.toLocaleDateString('pt-BR');
     } catch (e) { return '-'; }
   };
 

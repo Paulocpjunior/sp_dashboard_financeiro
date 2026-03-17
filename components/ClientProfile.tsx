@@ -126,7 +126,7 @@ export const ClientProfile: React.FC<ClientProfileProps> = ({ clientName, transa
                     </div>
                     <div>
                       <p className="text-sm font-bold text-slate-800 dark:text-white">{t.description || 'Honorários'}</p>
-                      <p className="text-[10px] text-slate-500">{new Date(t.date).toLocaleDateString('pt-BR')} • Venc: {new Date(t.dueDate).toLocaleDateString('pt-BR')}</p>
+                      <p className="text-[10px] text-slate-500">{(() => { try { const s: any = t.date; if (!s) return '-'; const p = String(s).split(/[-\/]/); if (p.length === 3) { const d = p[0].length === 4 ? new Date(+p[0], +p[1]-1, +p[2]) : new Date(+p[2], +p[1]-1, +p[0]); return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR'); } return '-'; } catch { return '-'; } })()} • Venc: {(() => { try { const s: any = t.dueDate; if (!s) return '-'; if (typeof s === 'object' && s !== null && 'seconds' in s) return new Date(s.seconds * 1000).toLocaleDateString('pt-BR'); const p = String(s).split(/[-\/]/); if (p.length === 3) { const d = p[0].length === 4 ? new Date(+p[0], +p[1]-1, +p[2]) : new Date(+p[2], +p[1]-1, +p[0]); return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR'); } return '-'; } catch { return '-'; } })()}</p>
                     </div>
                   </div>
                   <div className="text-right">

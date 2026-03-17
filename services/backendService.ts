@@ -505,15 +505,24 @@ function normalizeStatus(val: string | undefined): 'Pago' | 'Pendente' | 'Agenda
 }
 function parseDate(dateStr: string | undefined): string {
   if (!dateStr) return '1970-01-01';
-  let clean = dateStr.replace(/^["']|["']$/g, '').trim().split(' ')[0];
+  if (dateStr === '[object Object]') return '1970-01-01';
+  let clean = dateStr.replace(/^["']|["']$/g, '').trim().split(' ')[0].split('T')[0];
   const ptBrRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/;
   const ptMatch = clean.match(ptBrRegex);
   if (ptMatch) {
     let year = ptMatch[3];
     if (year.length === 2) year = '20' + year;
+    else if (year.length === 3) year = '20' + year.slice(1);
+    const y = parseInt(year, 10);
+    if (y < 1900 || y > 2100) return '1970-01-01';
     return `${year}-${ptMatch[2].padStart(2, '0')}-${ptMatch[1].padStart(2, '0')}`;
   }
   const isoRegex = /^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/;
-  if (clean.match(isoRegex)) return clean.substring(0, 10);
+  const isoMatch = clean.match(isoRegex);
+  if (isoMatch) {
+    const y = parseInt(isoMatch[1], 10);
+    if (y < 1900 || y > 2100) return '1970-01-01';
+    return clean.substring(0, 10);
+  }
   return '1970-01-01';
 }
