@@ -33,14 +33,30 @@ export const ReportService = {
 
       const safeStr = (val: any) => val ? String(val) : '';
 
-      const formatDate = (dateStr: string | undefined) => {
-         try {
-             if (!dateStr || dateStr === '1970-01-01') return '-';
-             const date = new Date(dateStr);
-             const userTimezoneOffset = date.getTimezoneOffset() * 60000;
-             const adjustedDate = new Date(date.getTime() + userTimezoneOffset);
-             return adjustedDate.toLocaleDateString('pt-BR');
-         } catch (e) { return dateStr || '-'; }
+      const formatDate = (dateStr: any): string => {
+        if (!dateStr) return '-';
+        try {
+          let dateObj: Date;
+          if (typeof dateStr === 'object' && dateStr !== null && 'seconds' in dateStr) {
+            dateObj = new Date(dateStr.seconds * 1000);
+          } else if (typeof dateStr === 'string') {
+            if (dateStr === '1970-01-01' || dateStr === '[object Object]') return '-';
+            const parts = dateStr.split(/[-\/]/);
+            if (parts.length === 3) {
+              if (parts[0].length === 4) {
+                dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+              } else {
+                dateObj = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+              }
+            } else {
+              dateObj = new Date(dateStr);
+            }
+          } else {
+            dateObj = new Date(dateStr);
+          }
+          if (isNaN(dateObj.getTime())) return '-';
+          return dateObj.toLocaleDateString('pt-BR');
+        } catch (e) { return '-'; }
       };
 
       const doc = new jsPDF({ orientation: 'landscape' });
@@ -144,7 +160,7 @@ export const ReportService = {
           'valorPago': 'Valor Pago',
           'status': 'Status',
           'client': 'Cliente / Observação',
-          'cpfCnpj': 'N.Cliente'
+          'clientNumber': 'N.Cliente'
         };
         const sortDirLabel = filters.sortDirection === 'desc' ? 'Decrescente' : 'Crescente';
         infoText += `Ordenado por: ${sortFieldLabels[filters.sortField] || filters.sortField} (${sortDirLabel})`;
@@ -177,7 +193,7 @@ export const ReportService = {
         // Observação a Pagar = Cliente / Favorecido
         const observacao = safeStr(t.client);
         
-        const numeroCliente = safeStr(t.cpfCnpj);
+        const numeroCliente = safeStr(t.clientNumber);
         
         const valRec = safeNum(t.valueReceived);
         const valPaid = safeNum(t.valuePaid);
