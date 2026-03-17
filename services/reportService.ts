@@ -193,7 +193,7 @@ export const ReportService = {
         // Observação a Pagar = Cliente / Favorecido
         const observacao = safeStr(t.client);
         
-        const numeroCliente = safeStr(t.clientNumber);
+        const numeroCliente = safeStr((t as any).clientNumber || (t as any).nCliente || '');
         
         const valRec = safeNum(t.valueReceived);
         const valPaid = safeNum(t.valuePaid);

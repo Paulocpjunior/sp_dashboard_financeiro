@@ -232,6 +232,10 @@ export const DataService = {
                 t.date        = normalizeFirestoreDate(t.date)        || t.date;
                 t.dueDate     = normalizeFirestoreDate(t.dueDate)     || t.dueDate;
                 t.paymentDate = normalizeFirestoreDate(t.paymentDate) || t.paymentDate || '';
+                // ★ FIX: Normalizar clientNumber (Apps Script pode gravar como nCliente)
+                if (!t.clientNumber && (t as any).nCliente) {
+                  t.clientNumber = parseInt(String((t as any).nCliente)) || undefined;
+                }
                 // ★ FIX: Normalizar campo movement (Saida→Saída, entrada→Entrada)
                 if (t.movement) {
                   const mLower = String(t.movement).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -440,6 +444,10 @@ export const DataService = {
           docData.date        = normalizeFirestoreDate(docData.date)        || docData.date;
           docData.dueDate     = normalizeFirestoreDate(docData.dueDate)     || docData.dueDate;
           docData.paymentDate = normalizeFirestoreDate(docData.paymentDate) || docData.paymentDate || '';
+          // ★ FIX: Normalizar clientNumber
+          if (!docData.clientNumber && (docData as any).nCliente) {
+            docData.clientNumber = parseInt(String((docData as any).nCliente)) || undefined;
+          }
           if (docData.movement) {
             const mLower = String(docData.movement).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
             if (mLower === 'entrada' || mLower === 'receita' || mLower === 'credito') {
