@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, LogOut, Menu, X, Wallet, FileText, Wifi, TrendingUp, TrendingDown, DollarSign, Building2, MessageCircle, CheckCircle } from 'lucide-react';
+import { LayoutDashboard, Users, LogOut, Menu, X, Wallet, FileText, Wifi, TrendingUp, TrendingDown, DollarSign, MessageCircle, CheckCircle } from 'lucide-react';
 import { AuthService } from '../services/authService';
 import { DataService } from '../services/dataService';
 import { KPIData } from '../types';
@@ -124,8 +124,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         {/* LOGO AREA - PROMINENT */}
         <div className="flex items-center justify-between h-24 px-6 bg-royal-900 dark:bg-slate-800/50 shrink-0 border-b border-royal-800/50 dark:border-slate-700">
           <div className="flex items-center gap-3.5">
-            <div className="bg-gradient-to-br from-royal-500 to-royal-700 p-2.5 rounded-xl shadow-lg shadow-royal-900/40 border border-royal-400/20">
-                <Building2 className="h-7 w-7 text-white" />
+            <div className="bg-gradient-to-br from-royal-950 to-royal-900 p-1.5 rounded-xl shadow-lg border border-royal-800/30">
+                <img src="/logo.png" alt="SP Contábil" className="h-10 w-10 object-contain drop-shadow-[0_0_8px_rgba(20,0,255,0.8)]" />
             </div>
             <div className="flex flex-col">
                 <span className="font-extrabold text-xl tracking-tight leading-none text-white font-sans">SP Contábil</span>
@@ -209,8 +209,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <Menu className="h-6 w-6" />
           </button>
           <div className="flex items-center gap-3">
-             <div className="bg-gradient-to-br from-royal-600 to-royal-800 p-1.5 rounded-lg shadow-sm">
-                <Building2 className="h-5 w-5 text-white" />
+             <div className="bg-royal-950 p-1.5 rounded-lg border border-royal-800/30">
+                <img src="/logo.png" alt="SP Contábil" className="h-6 w-6 object-contain drop-shadow-[0_0_6px_rgba(20,0,255,0.7)]" />
              </div>
              <span className="font-bold text-slate-800 dark:text-white tracking-tight">SP Contábil</span>
           </div>
