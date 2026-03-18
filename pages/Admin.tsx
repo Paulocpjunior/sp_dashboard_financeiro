@@ -30,6 +30,30 @@ const sha256 = async (message: string): Promise<string> => {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
+
+const JOTFORM_API_KEY = '3022b146b9a70f8d6f6c3d2292739522';
+const JOTFORM_FORM_ID = '210020525580845';
+
+// Atualiza submission no JotForm via API
+async function updateJotformSubmission(submissionId: string, updates: Record<string, string>): Promise<boolean> {
+  try {
+    const formData = new FormData();
+    Object.entries(updates).forEach(([key, value]) => {
+      formData.append(key, value);
+    });
+    const resp = await fetch(
+      `https://api.jotform.com/submission/${submissionId}?apiKey=${JOTFORM_API_KEY}`,
+      { method: 'POST', body: formData }
+    );
+    const data = await resp.json();
+    console.log('[JotForm API] Resposta:', data);
+    return resp.ok && data.responseCode === 200;
+  } catch(e) {
+    console.error('[JotForm API] Erro:', e);
+    return false;
+  }
+}
+
 const Admin: React.FC = () => {
   const [users, setUsers] = useState<UserType[]>([]);
   const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
@@ -137,8 +161,30 @@ const Admin: React.FC = () => {
         paidBy: txForm.paidBy || selectedTx.paidBy || '',
         observacaoAPagar: txForm.observacaoAPagar || '',
       };
+
+      // 1. Salvar no Firestore
       await updateDoc(docRef, updates);
-      setTxMessage({ type: 'success', text: 'Lançamento atualizado com sucesso!' });
+
+      // 2. Se tem submissionId, atualizar no JotForm também
+      const submissionId = (selectedTx as any).submissionId || txForm.submissionId;
+      let jotformMsg = '';
+      if (submissionId) {
+        // Mapear campos do dashboard para campos do JotForm
+        const jotformUpdates: Record<string, string> = {};
+        if (txForm.status)       jotformUpdates['submission[q291_docpago]']         = txForm.status === 'Pago' ? 'Sim' : 'Não';
+        if (txForm.paymentDate)  jotformUpdates['submission[q129_dataBaixa]']        = txForm.paymentDate;
+        if (txForm.valuePaid)    jotformUpdates['submission[q56_valorRefvalor56]']   = String(txForm.valuePaid);
+        if (txForm.observacaoAPagar !== undefined) jotformUpdates['submission[q17_observacao]'] = txForm.observacaoAPagar || '';
+
+        if (Object.keys(jotformUpdates).length > 0) {
+          const jotformOk = await updateJotformSubmission(submissionId, jotformUpdates);
+          jotformMsg = jotformOk ? ' ✓ JotForm sincronizado.' : ' ⚠ JotForm não sincronizado (sem submissionId ou erro na API).';
+        }
+      } else {
+        jotformMsg = ' ⚠ Sem submissionId — JotForm não sincronizado para este registro.';
+      }
+
+      setTxMessage({ type: 'success', text: 'Lançamento atualizado com sucesso!' + jotformMsg });
       await DataService.refreshCache();
       const updated = {...selectedTx, ...updates} as Transaction;
       setTxResults(prev => prev.map(t => t.id === selectedTx.id ? updated : t));
@@ -1382,10 +1428,17 @@ const Admin: React.FC = () => {
                   <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Observação</label>
                   <textarea rows={2} value={txForm.observacaoAPagar || ''} onChange={e => setTxForm(p => ({...p, observacaoAPagar: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none resize-none" />
                 </div>
-                {/* ID (readonly) */}
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">ID do Documento (Firebase)</label>
+                {/* IDs (readonly) */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">ID Firebase</label>
                   <input type="text" value={selectedTx.id} readOnly className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-400 text-xs font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">
+                    JotForm Submission ID
+                    {!(selectedTx as any).submissionId && <span className="ml-2 text-amber-500 normal-case font-normal">(não disponível — próximas baixas via JotForm serão sincronizadas)</span>}
+                  </label>
+                  <input type="text" value={(selectedTx as any).submissionId || '—'} readOnly className={`w-full px-3 py-2 border rounded-lg text-xs font-mono ${ (selectedTx as any).submissionId ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-400' }`} />
                 </div>
                 {txMessage && (
                   <div className={`sm:col-span-2 p-3 rounded-lg text-sm flex items-center gap-2 ${ txMessage.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 border border-green-200 dark:border-green-800' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300 border border-red-200 dark:border-red-800' }`}>

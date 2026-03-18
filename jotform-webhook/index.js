@@ -10,6 +10,8 @@ app.use(express.urlencoded({ extended: true }));
 const SPREADSHEET_ID = '17mHd8eqKoj7Cl6E2MCkr0PczFj-lKv_vmFRCY5hypwg';
 const SHEET_NAME = 'Formulário de Controle de Caixa';
 const PROJECT_ID = process.env.GCP_PROJECT_ID || 'gen-lang-client-0888019226';
+const JOTFORM_API_KEY = '3022b146b9a70f8d6f6c3d2292739522';
+const JOTFORM_FORM_ID = '210020525580845';
 
 function parseJotformDate(val) {
   if (!val) return null;
@@ -70,42 +72,54 @@ async function updateSheets(rowIndex, status, valorPago, dataPgto) {
   console.log(`Sheets atualizado: linha ${rowIndex}`);
 }
 
-async function updateFirestore(sheetRow, status, valorPago, dataPgto) {
+async function updateFirestore(sheetRow, status, valorPago, dataPgto, submissionId) {
   const docId = `trx-${sheetRow}`;
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}?updateMask.fieldPaths=pago&updateMask.fieldPaths=valorPago&updateMask.fieldPaths=dataPagamento`;
   const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/datastore'] });
   const token = await (await auth.getClient()).getAccessToken();
+
+  // Campos base sempre atualizados
+  const fields = {
+    pago:           { stringValue: status },
+    valorPago:      { stringValue: valorPago ? String(valorPago) : '' },
+    dataPagamento:  { stringValue: dataPgto || '' },
+  };
+
+  // Salvar submissionId se disponível
+  if (submissionId) {
+    fields.submissionId = { stringValue: String(submissionId) };
+  }
+
+  const updateMask = Object.keys(fields).map(f => `updateMask.fieldPaths=${f}`).join('&');
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}?${updateMask}`;
+
   const resp = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.token}` },
-    body: JSON.stringify({
-      fields: {
-        pago: { stringValue: status },
-        valorPago: { stringValue: valorPago ? String(valorPago) : '' },
-        dataPagamento: { stringValue: dataPgto || '' },
-      },
-    }),
+    body: JSON.stringify({ fields }),
   });
+
   if (!resp.ok) throw new Error(`Firestore PATCH falhou (${docId}): ${await resp.text()}`);
-  console.log(`Firestore atualizado: ${docId}`);
+  console.log(`Firestore atualizado: ${docId} | submissionId: ${submissionId || 'N/A'}`);
 }
 
 app.post('/', upload.any(), async (req, res) => {
   try {
-    // JotForm envia dados reais dentro de rawRequest como string JSON
     const topBody = req.body || {};
     let raw = {};
     if (topBody.rawRequest) {
       try { raw = JSON.parse(topBody.rawRequest); } catch(e) { raw = {}; }
     }
 
-    const docPago = (raw.q291_docpago || '').toString().toUpperCase().trim();
-    const movimentacao = (raw.q44_movimentacao44 || '').toString().trim();
-    const valorRef = raw.q56_valorRefvalor56 || raw.q57_valorPago || '';
-    const dataAPagar = parseJotformDate(raw.q313_dataA);
-    const dataBaixa = parseJotformDate(raw.q129_dataBaixa);
+    // ★ Capturar submissionID — JotForm envia no rawRequest ou no body direto
+    const submissionId = raw.submissionID || topBody.submissionID || raw.submission_id || topBody.submission_id || null;
 
-    console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar });
+    const docPago      = (raw.q291_docpago || '').toString().toUpperCase().trim();
+    const movimentacao = (raw.q44_movimentacao44 || '').toString().trim();
+    const valorRef     = raw.q56_valorRefvalor56 || raw.q57_valorPago || '';
+    const dataAPagar   = parseJotformDate(raw.q313_dataA);
+    const dataBaixa    = parseJotformDate(raw.q129_dataBaixa);
+
+    console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar, submissionId });
 
     if (docPago !== 'SIM') {
       console.log('Ignorado: Doc.Pago =', docPago);
@@ -127,11 +141,11 @@ app.post('/', upload.any(), async (req, res) => {
 
     await Promise.all([
       updateSheets(match.rowIndex, 'Pago', valorRef, dataPgto),
-      updateFirestore(match.sheetRow, 'Pago', valorRef, dataPgto),
+      updateFirestore(match.sheetRow, 'Pago', valorRef, dataPgto, submissionId),
     ]);
 
-    console.log(`SUCESSO: ${movimentacao} → linha ${match.rowIndex}`);
-    return res.status(200).json({ status: 'success', movimentacao, rowIndex: match.rowIndex });
+    console.log(`SUCESSO: ${movimentacao} → linha ${match.rowIndex} | submission: ${submissionId}`);
+    return res.status(200).json({ status: 'success', movimentacao, rowIndex: match.rowIndex, submissionId });
 
   } catch (err) {
     console.error('Erro:', err.message);
@@ -139,7 +153,7 @@ app.post('/', upload.any(), async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.json({ status: 'jotform-webhook online' }));
+app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '2.0' }));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Webhook rodando na porta ${PORT}`));
