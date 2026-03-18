@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthService } from '../services/authService';
 import { BackendService } from '../services/backendService';
-import { Building2, User, Lock, Eye, EyeOff, ShieldCheck, Loader2, AlertCircle, ArrowLeft, Mail, CheckCircle2, UserPlus, Phone, BadgeCheck } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, ShieldCheck, Loader2, AlertCircle, ArrowLeft, Mail, CheckCircle2, UserPlus, Phone, BadgeCheck } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 const Login: React.FC = () => {
@@ -188,8 +188,8 @@ const Login: React.FC = () => {
           <div className="animate-in fade-in slide-in-from-left-4 duration-300">
             {/* Header with SP CONTABIL Branding */}
             <div className="text-center mb-8">
-              <div className="w-[80px] h-[80px] bg-royal-700 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-royal-700/40 transform rotate-3 hover:rotate-0 transition-transform duration-300">
-                <Building2 className="h-10 w-10 text-white" />
+              <div className="w-[80px] h-[80px] bg-royal-950 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-royal-700/40 border border-royal-800/30 transform rotate-3 hover:rotate-0 transition-transform duration-300">
+                <img src="/logo.png" alt="SP Contábil" className="h-14 w-14 object-contain drop-shadow-[0_0_8px_rgba(20,0,255,0.8)]" />
               </div>
               <h1 className="text-2xl font-bold text-slate-800 dark:text-white mb-1 tracking-tight">SP CONTÁBIL</h1>
               <p className="text-royal-600 dark:text-royal-400 text-xs font-semibold uppercase tracking-widest mb-2">SP FINANCIAL DASHBOARD</p>
