@@ -1,12 +1,12 @@
 
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
-import { User, Shield, CheckCircle, XCircle, Loader2, Database, Save, RotateCcw, AlertTriangle, UserPlus, Clock, Mail, Phone, X, Eye, EyeOff, RefreshCw, Key, Lock, Unlock } from 'lucide-react';
+import { User, Shield, CheckCircle, XCircle, Loader2, Database, Save, RotateCcw, AlertTriangle, UserPlus, Clock, Mail, Phone, X, Eye, EyeOff, RefreshCw, Key, Lock, Unlock, FileEdit, Search, PlusCircle, Trash2 } from 'lucide-react';
 import { BackendService } from '../services/backendService';
 import { DataService } from '../services/dataService';
-import { User as UserType } from '../types';
+import { User as UserType, Transaction } from '../types';
 import { MOCK_USERS, APPS_SCRIPT_URL } from '../constants';
-import { collection, getDocs, writeBatch, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../services/firebaseConfig';
 
 
@@ -67,6 +67,134 @@ const Admin: React.FC = () => {
   const [selectedUserForPass, setSelectedUserForPass] = useState<UserType | null>(null);
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [isSavingPass, setIsSavingPass] = useState(false);
+
+  // ===== MÓDULO EDITOR DE LANÇAMENTOS =====
+  const [txSearch, setTxSearch] = useState('');
+  const [txResults, setTxResults] = useState<Transaction[]>([]);
+  const [txSearching, setTxSearching] = useState(false);
+  const [txSearched, setTxSearched] = useState(false);
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [showTxModal, setShowTxModal] = useState(false);
+  const [txForm, setTxForm] = useState<Partial<Transaction>>({});
+  const [txSaving, setTxSaving] = useState(false);
+  const [txMessage, setTxMessage] = useState<{type: 'success'|'error', text: string}|null>(null);
+  const [showNewTxModal, setShowNewTxModal] = useState(false);
+  const [newTxForm, setNewTxForm] = useState<Partial<Transaction>>({
+    date: '', dueDate: '', description: '', client: '', status: 'Pendente',
+    movement: 'Saída', type: '', bankAccount: '', valueReceived: 0, valuePaid: 0, paidBy: ''
+  });
+  const [newTxSaving, setNewTxSaving] = useState(false);
+  const [newTxMessage, setNewTxMessage] = useState<{type: 'success'|'error', text: string}|null>(null);
+
+  const handleTxSearch = async () => {
+    if (!txSearch.trim()) return;
+    setTxSearching(true);
+    setTxSearched(false);
+    setTxResults([]);
+    try {
+      const all = DataService.getCachedData();
+      const q = txSearch.toLowerCase();
+      const found = all.filter(t =>
+        t.description?.toLowerCase().includes(q) ||
+        t.client?.toLowerCase().includes(q) ||
+        t.id?.toLowerCase().includes(q)
+      ).slice(0, 20);
+      setTxResults(found);
+      setTxSearched(true);
+    } catch(e) {
+      setTxResults([]);
+      setTxSearched(true);
+    } finally {
+      setTxSearching(false);
+    }
+  };
+
+  const openEditTx = (tx: Transaction) => {
+    setSelectedTx(tx);
+    setTxForm({...tx});
+    setTxMessage(null);
+    setShowTxModal(true);
+  };
+
+  const handleSaveTx = async () => {
+    if (!selectedTx) return;
+    setTxSaving(true);
+    setTxMessage(null);
+    try {
+      const docRef = doc(db, 'transactions', selectedTx.id);
+      const updates: any = {
+        description: txForm.description || selectedTx.description,
+        client: txForm.client || selectedTx.client,
+        status: txForm.status || selectedTx.status,
+        movement: txForm.movement || selectedTx.movement,
+        type: txForm.type || selectedTx.type,
+        bankAccount: txForm.bankAccount || selectedTx.bankAccount,
+        dueDate: txForm.dueDate || selectedTx.dueDate,
+        date: txForm.date || selectedTx.date,
+        paymentDate: txForm.paymentDate || selectedTx.paymentDate || null,
+        valueReceived: Number(txForm.valueReceived) || 0,
+        valuePaid: Number(txForm.valuePaid) || 0,
+        paidBy: txForm.paidBy || selectedTx.paidBy || '',
+        observacaoAPagar: txForm.observacaoAPagar || '',
+      };
+      await updateDoc(docRef, updates);
+      setTxMessage({ type: 'success', text: 'Lançamento atualizado com sucesso!' });
+      await DataService.refreshCache();
+      const updated = {...selectedTx, ...updates} as Transaction;
+      setTxResults(prev => prev.map(t => t.id === selectedTx.id ? updated : t));
+    } catch(e: any) {
+      setTxMessage({ type: 'error', text: 'Erro ao salvar: ' + (e.message || 'Verifique a conexão.') });
+    } finally {
+      setTxSaving(false);
+    }
+  };
+
+  const handleDeleteTx = async () => {
+    if (!selectedTx) return;
+    if (!confirm('Tem certeza que deseja EXCLUIR este lançamento? Esta ação não pode ser desfeita.')) return;
+    setTxSaving(true);
+    try {
+      const docRef = doc(db, 'transactions', selectedTx.id);
+      await updateDoc(docRef, { isExcluded: true });
+      setTxMessage({ type: 'success', text: 'Lançamento excluído (marcado como inativo).' });
+      setTxResults(prev => prev.filter(t => t.id !== selectedTx.id));
+      setTimeout(() => setShowTxModal(false), 1500);
+      await DataService.refreshCache();
+    } catch(e: any) {
+      setTxMessage({ type: 'error', text: 'Erro ao excluir: ' + (e.message || '') });
+    } finally {
+      setTxSaving(false);
+    }
+  };
+
+  const handleCreateTx = async () => {
+    if (!newTxForm.description || !newTxForm.date || !newTxForm.dueDate) {
+      setNewTxMessage({ type: 'error', text: 'Preencha pelo menos: Descrição, Data e Vencimento.' });
+      return;
+    }
+    setNewTxSaving(true);
+    setNewTxMessage(null);
+    try {
+      const newDoc = {
+        ...newTxForm,
+        valueReceived: Number(newTxForm.valueReceived) || 0,
+        valuePaid: Number(newTxForm.valuePaid) || 0,
+        createdAt: new Date().toISOString(),
+        createdBy: 'admin_manual',
+        isExcluded: false,
+      };
+      await addDoc(collection(db, 'transactions'), newDoc);
+      setNewTxMessage({ type: 'success', text: 'Lançamento criado com sucesso!' });
+      setNewTxForm({ date: '', dueDate: '', description: '', client: '', status: 'Pendente', movement: 'Saída', type: '', bankAccount: '', valueReceived: 0, valuePaid: 0, paidBy: '' });
+      await DataService.refreshCache();
+    } catch(e: any) {
+      setNewTxMessage({ type: 'error', text: 'Erro ao criar: ' + (e.message || '') });
+    } finally {
+      setNewTxSaving(false);
+    }
+  };
+
+
 
 
   const loadPendingUsers = async () => {
@@ -1091,6 +1219,265 @@ const Admin: React.FC = () => {
           </div>
         </div>
       )}
+
+        {/* ===== MÓDULO EDITOR DE LANÇAMENTOS ===== */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6 animate-in slide-in-from-bottom-2">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-royal-900/20 rounded-lg text-royal-600 dark:text-royal-400">
+                <FileEdit className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-800 dark:text-white">Editar Lançamentos</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Pesquise, edite, crie ou exclua lançamentos diretamente no Firebase</p>
+              </div>
+            </div>
+            <button
+              onClick={() => { setShowNewTxModal(true); setNewTxMessage(null); }}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              <PlusCircle className="h-4 w-4" />
+              Novo Lançamento
+            </button>
+          </div>
+
+          {/* Busca */}
+          <div className="flex gap-2 mb-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                value={txSearch}
+                onChange={e => setTxSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleTxSearch()}
+                placeholder="Buscar por descrição, cliente ou ID..."
+                className="w-full pl-9 pr-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none"
+              />
+            </div>
+            <button
+              onClick={handleTxSearch}
+              disabled={txSearching}
+              className="px-4 py-2.5 bg-royal-800 hover:bg-royal-900 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {txSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              Buscar
+            </button>
+          </div>
+
+          {/* Resultados */}
+          {txSearched && txResults.length === 0 && (
+            <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-6">Nenhum lançamento encontrado.</p>
+          )}
+          {txResults.length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Descrição</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Cliente</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Vencimento</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Valor</th>
+                    <th className="px-4 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {txResults.map(tx => (
+                    <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                      <td className="px-4 py-3 text-slate-800 dark:text-white max-w-[200px] truncate">{tx.description}</td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 max-w-[150px] truncate">{tx.client}</td>
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{tx.dueDate}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${ tx.status === 'Pago' ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300' : tx.status === 'Pendente' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300' }`}>{tx.status}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700 dark:text-slate-200 font-mono text-xs">
+                        {tx.movement === 'Entrada' ? (tx.valueReceived || 0).toLocaleString('pt-BR', {style:'currency',currency:'BRL'}) : (tx.valuePaid || 0).toLocaleString('pt-BR', {style:'currency',currency:'BRL'})}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button onClick={() => openEditTx(tx)} className="flex items-center gap-1 px-3 py-1.5 bg-royal-800 hover:bg-royal-900 text-white rounded-lg text-xs font-medium transition-colors">
+                          <FileEdit className="h-3 w-3" /> Editar
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* MODAL: Editar Lançamento */}
+        {showTxModal && selectedTx && (
+          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><FileEdit className="h-4 w-4" /> Editar Lançamento</h3>
+                <button onClick={() => setShowTxModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Descrição */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Descrição / Movimentação</label>
+                  <input type="text" value={txForm.description || ''} onChange={e => setTxForm(p => ({...p, description: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Cliente */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Cliente / Credor</label>
+                  <input type="text" value={txForm.client || ''} onChange={e => setTxForm(p => ({...p, client: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Banco */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Conta Bancária</label>
+                  <input type="text" value={txForm.bankAccount || ''} onChange={e => setTxForm(p => ({...p, bankAccount: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Status */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Status</label>
+                  <select value={txForm.status || 'Pendente'} onChange={e => setTxForm(p => ({...p, status: e.target.value as any}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none">
+                    <option value="Pendente">Pendente</option>
+                    <option value="Pago">Pago</option>
+                    <option value="Agendado">Agendado</option>
+                  </select>
+                </div>
+                {/* Movimentação */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Movimentação</label>
+                  <select value={txForm.movement || 'Saída'} onChange={e => setTxForm(p => ({...p, movement: e.target.value as any}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none">
+                    <option value="Saída">Saída</option>
+                    <option value="Entrada">Entrada</option>
+                  </select>
+                </div>
+                {/* Data Emissão */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Data Emissão</label>
+                  <input type="date" value={txForm.date || ''} onChange={e => setTxForm(p => ({...p, date: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Vencimento */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Vencimento</label>
+                  <input type="date" value={txForm.dueDate || ''} onChange={e => setTxForm(p => ({...p, dueDate: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Data Pagamento */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Data Pagamento (Baixa)</label>
+                  <input type="date" value={txForm.paymentDate || ''} onChange={e => setTxForm(p => ({...p, paymentDate: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Valor Pago */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Valor Pago / Saída (R$)</label>
+                  <input type="number" step="0.01" value={txForm.valuePaid || 0} onChange={e => setTxForm(p => ({...p, valuePaid: parseFloat(e.target.value)}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Valor Recebido */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Valor Recebido / Entrada (R$)</label>
+                  <input type="number" step="0.01" value={txForm.valueReceived || 0} onChange={e => setTxForm(p => ({...p, valueReceived: parseFloat(e.target.value)}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Pago Por */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Pago Por</label>
+                  <input type="text" value={txForm.paidBy || ''} onChange={e => setTxForm(p => ({...p, paidBy: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none" />
+                </div>
+                {/* Observação */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Observação</label>
+                  <textarea rows={2} value={txForm.observacaoAPagar || ''} onChange={e => setTxForm(p => ({...p, observacaoAPagar: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-royal-600/10 focus:border-royal-600 outline-none resize-none" />
+                </div>
+                {/* ID (readonly) */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">ID do Documento (Firebase)</label>
+                  <input type="text" value={selectedTx.id} readOnly className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-400 text-xs font-mono" />
+                </div>
+                {txMessage && (
+                  <div className={`sm:col-span-2 p-3 rounded-lg text-sm flex items-center gap-2 ${ txMessage.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 border border-green-200 dark:border-green-800' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300 border border-red-200 dark:border-red-800' }`}>
+                    {txMessage.type === 'success' ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                    {txMessage.text}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 rounded-b-xl">
+                <button onClick={handleDeleteTx} disabled={txSaving} className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                  <Trash2 className="h-4 w-4" /> Excluir
+                </button>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowTxModal(false)} className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-sm">Cancelar</button>
+                  <button onClick={handleSaveTx} disabled={txSaving} className="flex items-center gap-2 px-4 py-2 bg-royal-800 hover:bg-royal-900 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                    {txSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Salvando...</> : <><Save className="h-4 w-4" /> Salvar</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: Novo Lançamento */}
+        {showNewTxModal && (
+          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><PlusCircle className="h-4 w-4 text-green-600" /> Novo Lançamento</h3>
+                <button onClick={() => setShowNewTxModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X className="h-5 w-5" /></button>
+              </div>
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Descrição *</label>
+                  <input type="text" value={newTxForm.description || ''} onChange={e => setNewTxForm(p => ({...p, description: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" placeholder="Ex: Pagamento fornecedor XYZ" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Cliente / Credor</label>
+                  <input type="text" value={newTxForm.client || ''} onChange={e => setNewTxForm(p => ({...p, client: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Conta Bancária</label>
+                  <input type="text" value={newTxForm.bankAccount || ''} onChange={e => setNewTxForm(p => ({...p, bankAccount: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Status</label>
+                  <select value={newTxForm.status || 'Pendente'} onChange={e => setNewTxForm(p => ({...p, status: e.target.value as any}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none">
+                    <option value="Pendente">Pendente</option>
+                    <option value="Pago">Pago</option>
+                    <option value="Agendado">Agendado</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Movimentação</label>
+                  <select value={newTxForm.movement || 'Saída'} onChange={e => setNewTxForm(p => ({...p, movement: e.target.value as any}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none">
+                    <option value="Saída">Saída (A Pagar)</option>
+                    <option value="Entrada">Entrada (A Receber)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Data Emissão *</label>
+                  <input type="date" value={newTxForm.date || ''} onChange={e => setNewTxForm(p => ({...p, date: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Vencimento *</label>
+                  <input type="date" value={newTxForm.dueDate || ''} onChange={e => setNewTxForm(p => ({...p, dueDate: e.target.value}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Valor Saída / Pago (R$)</label>
+                  <input type="number" step="0.01" value={newTxForm.valuePaid || 0} onChange={e => setNewTxForm(p => ({...p, valuePaid: parseFloat(e.target.value)}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Valor Entrada / Recebido (R$)</label>
+                  <input type="number" step="0.01" value={newTxForm.valueReceived || 0} onChange={e => setNewTxForm(p => ({...p, valueReceived: parseFloat(e.target.value)}))} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-green-500/20 focus:border-green-500 outline-none" />
+                </div>
+                {newTxMessage && (
+                  <div className={`sm:col-span-2 p-3 rounded-lg text-sm flex items-center gap-2 ${ newTxMessage.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 border border-green-200 dark:border-green-800' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300 border border-red-200 dark:border-red-800' }`}>
+                    {newTxMessage.type === 'success' ? <CheckCircle className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+                    {newTxMessage.text}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 rounded-b-xl">
+                <button onClick={() => setShowNewTxModal(false)} className="px-4 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-sm">Cancelar</button>
+                <button onClick={handleCreateTx} disabled={newTxSaving} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                  {newTxSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Criando...</> : <><PlusCircle className="h-4 w-4" /> Criar Lançamento</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
     </Layout>
   );
 };
