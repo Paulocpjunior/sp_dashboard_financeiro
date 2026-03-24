@@ -499,11 +499,16 @@ const DataTable: React.FC<DataTableProps> = ({
     };
 
     const getDescricao = (row: Transaction) => {
-      if (row.description) {
-          return row.description;
+      // CORREÇÃO: Não usar row.description se for um número puro
+      // Para Entrada de Caixa, coluna F pode conter N.Cliente numérico em vez de texto descritivo
+      const desc = row.description;
+      const isNumericDesc = desc && /^\d+$/.test(String(desc).trim());
+
+      if (desc && !isNumericDesc) {
+          return desc;
       }
+      // Fallback: descrição baseada em data de vencimento
       const date = new Date(row.dueDate);
-      // Mês abreviado para economizar caracteres (Ex: fev/2026)
       const mes = date.toLocaleString('pt-BR', { month: 'short' }).replace('.', '');
       const ano = date.getFullYear();
       return `Hon ${mes}/${ano}`;
@@ -512,8 +517,13 @@ const DataTable: React.FC<DataTableProps> = ({
     const rows = dataToExport.map(row => {
         const valor = formatValueCSV(row.totalCobranca || row.honorarios);
         const vencimento = formatDateCSV(row.dueDate);
-        
-        // Truncar descrição para máximo 20 caracteres (limite do layout Boleto Cloud)
+
+        // ★ CORREÇÃO CRÍTICA: NOSSO_NUMERO = N.Cliente do cliente
+        // Garante que cada boleto seja vinculado ao cliente correto no Boleto Cloud
+        const clientNum = (row as any).clientNumber || (row as any).nCliente || '';
+        const nossoNumero = clientNum ? String(clientNum) : '';
+
+        // DOCUMENTO = descrição legível do serviço (nunca um número puro)
         let rawDoc = getDescricao(row) || '';
         if (rawDoc.length > 20) {
             rawDoc = rawDoc.substring(0, 20);
@@ -528,12 +538,12 @@ const DataTable: React.FC<DataTableProps> = ({
 
         // Mapeamento para as 19 colunas esperadas
         return [
-            exportToken, // TOKEN_CONTA_BANCARIA (Preenchido pelo usuário no modal)
-            cpfCnpj,     // CPRF_PAGADOR (Específico por cliente)
-            valor,       // VALOR
-            vencimento,  // VENCIMENTO (DD/MM/YYYY)
-            '',          // NOSSO_NUMERO
-            documento,   // DOCUMENTO (Truncado para 20 chars)
+            exportToken,  // TOKEN_CONTA_BANCARIA (Preenchido pelo usuário no modal)
+            cpfCnpj,      // CPRF_PAGADOR (Específico por cliente)
+            valor,        // VALOR
+            vencimento,   // VENCIMENTO (DD/MM/YYYY)
+            nossoNumero,  // NOSSO_NUMERO = N.Cliente (identificador único → cliente correto)
+            documento,    // DOCUMENTO = Descrição legível (Hon abr/2026)
             '',          // MULTA
             '',          // JUROS
             '',          // DIAS_PARA_ENCARGOS
