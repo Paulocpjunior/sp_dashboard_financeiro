@@ -71,6 +71,10 @@ const Admin: React.FC = () => {
   const [syncTotal, setSyncTotal] = useState(0);
   const [syncMessage, setSyncMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
 
+  // Remover Duplicatas
+  const [isDeduplying, setIsDeduplying] = useState(false);
+  const [dedupMessage, setDedupMessage] = useState<{type: 'success' | 'error' | 'info', text: string} | null>(null);
+
   // Modal de Novo Usuário
   const [showNewUserModal, setShowNewUserModal] = useState(false);
   const [newUserForm, setNewUserForm] = useState({
@@ -432,6 +436,75 @@ const Admin: React.FC = () => {
       setSyncMessage({ type: 'error', text: 'Erro na sincronização: ' + (error.message || 'Tente novamente.') });
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  // ===== REMOVER DUPLICATAS =====
+  const handleDedup = async () => {
+    if (!confirm('Isso irá analisar o Firestore e remover lançamentos duplicados (mesmo cliente + vencimento + valor).\n\nContinuar?')) return;
+
+    setIsDeduplying(true);
+    setDedupMessage({ type: 'info', text: 'Analisando duplicatas no Firestore...' });
+
+    try {
+      const snapshot = await getDocs(collection(db, 'transactions'));
+      const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+      // Agrupa por chave: client + dueDate + valor
+      const seen = new Map<string, string>(); // chave → id do primeiro encontrado
+      const toDelete: string[] = [];
+
+      // Ordena por ID numérico para sempre manter o trx de menor número (mais antigo da planilha)
+      const sorted = [...all].sort((a, b) => {
+        const na = parseInt((a.id || '').replace('trx-', '')) || 0;
+        const nb = parseInt((b.id || '').replace('trx-', '')) || 0;
+        return na - nb;
+      });
+
+      for (const tx of sorted) {
+        const client = String(tx.client || tx.description || '').toLowerCase().trim();
+        const dueDate = String(tx.dueDate || '').trim();
+        const valor = String(tx.valuePaid || tx.valueReceived || tx.totalCobranca || '0');
+        const movement = String(tx.movement || '').toLowerCase().trim();
+        const key = `${movement}|${client}|${dueDate}|${valor}`;
+
+        if (!client && !dueDate) continue; // ignora linhas completamente vazias
+
+        if (seen.has(key)) {
+          toDelete.push(tx.id); // este é o duplicado — remove
+        } else {
+          seen.set(key, tx.id);
+        }
+      }
+
+      if (toDelete.length === 0) {
+        setDedupMessage({ type: 'success', text: '✅ Nenhuma duplicata encontrada! O Firestore está limpo.' });
+        setIsDeduplying(false);
+        return;
+      }
+
+      setDedupMessage({ type: 'info', text: `Encontradas ${toDelete.length} duplicatas. Removendo...` });
+
+      // Deleta em lotes de 500
+      const CHUNK = 500;
+      let deleted = 0;
+      for (let i = 0; i < toDelete.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        toDelete.slice(i, i + CHUNK).forEach(id => {
+          batch.delete(doc(db, 'transactions', id));
+        });
+        await batch.commit();
+        deleted += Math.min(CHUNK, toDelete.length - i);
+      }
+
+      setDedupMessage({ type: 'success', text: `✅ ${deleted} duplicata(s) removida(s) com sucesso! O dashboard foi atualizado.` });
+      await DataService.refreshCache();
+
+    } catch (error: any) {
+      console.error('[Dedup] Erro:', error);
+      setDedupMessage({ type: 'error', text: 'Erro ao remover duplicatas: ' + (error.message || 'Tente novamente.') });
+    } finally {
+      setIsDeduplying(false);
     }
   };
 
@@ -913,6 +986,60 @@ const Admin: React.FC = () => {
                      syncMessage.type === 'error' ? <XCircle className="h-4 w-4 shrink-0" /> :
                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />}
                     <span className="font-medium">{syncMessage.text}</span>
+                </div>
+            )}
+        </div>
+
+        {/* Remover Duplicatas */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                    <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+                </div>
+                <div>
+                    <h2 className="text-lg font-bold text-slate-800 dark:text-white">Remover Duplicatas</h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Detecta e remove lançamentos duplicados no Firestore (mesmo cliente + vencimento + valor)</p>
+                </div>
+            </div>
+
+            <div className="bg-red-50 dark:bg-red-900/10 p-4 rounded-lg border border-red-200 dark:border-red-800 mb-5">
+                <p className="text-sm text-red-800 dark:text-red-300 flex gap-2 items-start">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>
+                        Use quando o dashboard exibir o <strong>mesmo lançamento em duplicidade</strong>.
+                        O sistema mantém o documento mais antigo e remove os repetidos.
+                    </span>
+                </p>
+            </div>
+
+            <button
+                onClick={handleDedup}
+                disabled={isDeduplying}
+                className="w-full sm:w-auto px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 text-sm font-medium flex items-center justify-center gap-2 shadow-sm"
+            >
+                {isDeduplying ? (
+                    <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Analisando...</span>
+                    </>
+                ) : (
+                    <>
+                        <Trash2 className="h-4 w-4" />
+                        <span>Remover Duplicatas Agora</span>
+                    </>
+                )}
+            </button>
+
+            {dedupMessage && (
+                <div className={`mt-4 p-3 rounded-lg text-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-1 ${
+                    dedupMessage.type === 'success' ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 border border-green-200 dark:border-green-800' :
+                    dedupMessage.type === 'error' ? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300 border border-red-200 dark:border-red-800' :
+                    'bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                }`}>
+                    {dedupMessage.type === 'success' ? <CheckCircle className="h-4 w-4 shrink-0" /> :
+                     dedupMessage.type === 'error' ? <XCircle className="h-4 w-4 shrink-0" /> :
+                     <Clock className="h-4 w-4 shrink-0" />}
+                    <span className="font-medium">{dedupMessage.text}</span>
                 </div>
             )}
         </div>
