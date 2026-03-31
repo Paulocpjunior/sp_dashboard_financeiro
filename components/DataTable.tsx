@@ -14,6 +14,7 @@ interface DataTableProps {
   onIdFilterChange?: (value: string) => void;
   isLoading?: boolean;
   selectedType?: string;
+  selectedSource?: string;
   allData?: Transaction[];
   onDelete?: (id: string) => void;
   onClientClick?: (clientName: string) => void;
@@ -101,6 +102,7 @@ const DataTable: React.FC<DataTableProps> = ({
     clientOptions = [],
     isLoading = false,
     selectedType = '',
+    selectedSource = '',
     allData = [],
     onDelete,
     onClientClick,
@@ -306,7 +308,9 @@ const DataTable: React.FC<DataTableProps> = ({
   const isContasAReceber = normalizedType.includes('entrada') || 
                            normalizedType.includes('receber') ||
                            normalizedType.includes('servico') ||
-                           normalizedType.includes('consultoria');
+                           normalizedType.includes('consultoria') ||
+                           normalizedType.includes('wix') ||
+                           selectedSource === 'wix';
 
   const isMixedMode = !isContasAPagar && !isContasAReceber;
 
@@ -963,7 +967,7 @@ const DataTable: React.FC<DataTableProps> = ({
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">
                             {isPago && row.status !== 'Pendente' ? (
-                              <span className="text-green-600 dark:text-green-400">{formatDateFull(row.paymentDate || '')}</span>
+                              <span className="text-green-600 dark:text-green-400">{formatDateFull(row.paymentDate || row.dueDate || '')}</span>
                             ) : (
                               <span className="text-slate-400">-</span>
                             )}
