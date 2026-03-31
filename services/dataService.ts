@@ -535,10 +535,44 @@ export const DataService = {
       if (["pendente","nao","não","aberto"].includes(v)) return 'Pendente';
       return s.trim();
     };
+    const normalizeMovementVal = (s: string): string => {
+      const mLower = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      if (['entrada','receita','credito','sim','recebimento wix / cartao'].includes(mLower)) return 'Entrada';
+      if (['saida','despesa','debito','nao','não','n'].includes(mLower)) return 'Saída';
+      return s.trim();
+    };
+    const normalizeTypeVal = (s: string): string => {
+      const v = s.toLowerCase().trim();
+      if (v.includes('wix') || v.includes('cartao') || v.includes('cartão')) return 'Entrada de Caixa / Contas a Receber';
+      return s.trim();
+    };
     const rawValues = CACHED_TRANSACTIONS.map(t => String(t[field] || '').trim()).filter(Boolean);
-    const normalized = field === 'status' ? rawValues.map(normalizeStatusVal) : rawValues;
+    let normalized = rawValues;
+    if (field === 'status') normalized = rawValues.map(normalizeStatusVal);
+    if (field === 'movement') normalized = rawValues.map(normalizeMovementVal);
+    if (field === 'type') normalized = rawValues.map(normalizeTypeVal);
     const values = new Set(normalized);
     return Array.from(values).sort();
+  },
+
+  getWixStats: (): { total: number; pending: number; paid: number; totalValue: number; pendingValue: number } => {
+    if (!isDataLoaded) return { total: 0, pending: 0, paid: 0, totalValue: 0, pendingValue: 0 };
+    const wixTrx = CACHED_TRANSACTIONS.filter(t => t.source === 'wix');
+    const wixPending = wixTrx.filter(t => {
+      const s = (t.status || '').toLowerCase();
+      return !['pago','recebido','sim','ok','liquidado','quitado'].includes(s);
+    });
+    const wixPaid = wixTrx.filter(t => {
+      const s = (t.status || '').toLowerCase();
+      return ['pago','recebido','sim','ok','liquidado','quitado'].includes(s);
+    });
+    return {
+      total: wixTrx.length,
+      pending: wixPending.length,
+      paid: wixPaid.length,
+      totalValue: wixTrx.reduce((s, t) => s + (t.valorOriginal || 0), 0),
+      pendingValue: wixPending.reduce((s, t) => s + (t.valorOriginal || 0), 0),
+    };
   },
 
   getGlobalStats: (): KPIData => {
