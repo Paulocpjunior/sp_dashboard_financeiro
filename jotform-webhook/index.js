@@ -278,11 +278,12 @@ app.post('/', upload.any(), async (req, res) => {
           const docId = d.document.name.split('/').pop();
           const sheetRow = parseInt(docId.replace('trx-', ''));
           const rowIndex = sheetRow + 2; // trx-N = linha N+2 (header na linha 1, dados a partir da linha 2)
-          // Entradas: escreve SIM na col AJ e data na col X
-          await Promise.all([
-            updateSheetsEntrada(rowIndex, 'SIM', valorRef, dataPgto),
-            updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId),
-          ]);
+          // Escreve na planilha PRIMEIRO — Apps Script vai ler AJ=SIM e salvar Pago no Firestore
+          await updateSheetsEntrada(rowIndex, 'SIM', valorRef, dataPgto);
+          // Aguarda Apps Script processar (evita race condition)
+          await new Promise(r => setTimeout(r, 4000));
+          // Confirma Pago no Firestore (garante consistência mesmo se Apps Script demorar)
+          await updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId);
           trxIds.push(docId);
         }
         console.log('BAIXA RECEBER OK:', movimentacao, '->', trxIds.join(', '));
