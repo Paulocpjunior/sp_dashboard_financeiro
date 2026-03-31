@@ -891,7 +891,7 @@ const DataTable: React.FC<DataTableProps> = ({
                   const isRowSaida = rowType.includes('saida') || rowType.includes('pagar') || row.valuePaid > 0;
                   const isPending = row.status === 'Pendente' || row.status === 'Agendado';
                   const diasAtraso = calcDiasAtraso(row.dueDate, row.status);
-                  const saldoRestante = calcSaldoRestante(row.totalCobranca, row.valueReceived);
+                  const saldoRestante = calcSaldoRestante(row.totalCobranca || row.valorOriginal, row.valueReceived || (row.status === 'Pago' ? (row.valorOriginal || 0) : 0));
                   const isVencido = diasAtraso > 0;
                   // Fix: Cast 'Recebido' since it's not in the Transaction.status type union but might come from data
                   const isPago = row.status === 'Pago' || (row.status as string) === 'Recebido';
@@ -1009,10 +1009,10 @@ const DataTable: React.FC<DataTableProps> = ({
                             {formatCurrency(row.valorExtra)}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-right text-blue-600 dark:text-blue-400 font-semibold">
-                            {formatCurrency(row.totalCobranca)}
+                            {formatCurrency(row.totalCobranca || row.valorOriginal)}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-right text-green-600 dark:text-green-400 font-medium">
-                            {formatCurrency(row.valueReceived)}
+                            {formatCurrency(row.valueReceived || (row.status === 'Pago' ? row.valorOriginal : 0))}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-right">
                             {saldoRestante > 0 ? (
