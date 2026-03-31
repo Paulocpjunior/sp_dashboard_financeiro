@@ -130,6 +130,10 @@ const Dashboard: React.FC = () => {
         setAllFilteredData(allResult.data);
         setTotalPages(result.totalPages);
         setKpi(newKpi);
+      const wixFilt = allResult.data.filter((t: any) => t.source === 'wix');
+      const wixP = wixFilt.filter((t: any) => !['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      const wixD = wixFilt.filter((t: any) => ['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      setWixStats({ total: wixFilt.length, pending: wixP.length, paid: wixD.length, totalValue: wixFilt.reduce((s: number,t: any) => s+(t.valorOriginal||0),0), pendingValue: wixP.reduce((s: number,t: any) => s+(t.valorOriginal||0),0) });
       } catch (e: any) {
         setInitError(e.message || 'Erro ao conectar com o Banco de Dados Oficial.');
       } finally {
@@ -167,6 +171,10 @@ const Dashboard: React.FC = () => {
       setAllFilteredData(allResult.data);
       setTotalPages(result.totalPages);
       setKpi(newKpi);
+      const wixFiltered = allResult.data.filter((t: any) => t.source === 'wix');
+      const wixPend = wixFiltered.filter((t: any) => !['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      const wixPaid = wixFiltered.filter((t: any) => ['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      setWixStats({ total: wixFiltered.length, pending: wixPend.length, paid: wixPaid.length, totalValue: wixFiltered.reduce((s: number, t: any) => s + (t.valorOriginal||0), 0), pendingValue: wixPend.reduce((s: number, t: any) => s + (t.valorOriginal||0), 0) });
     });
 
     // Iniciar auto-refresh
@@ -209,6 +217,10 @@ const Dashboard: React.FC = () => {
       setAllFilteredData(allResult.data);
       setTotalPages(result.totalPages);
       setKpi(newKpi);
+      const wixFilt = allResult.data.filter((t: any) => t.source === 'wix');
+      const wixP = wixFilt.filter((t: any) => !['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      const wixD = wixFilt.filter((t: any) => ['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      setWixStats({ total: wixFilt.length, pending: wixP.length, paid: wixD.length, totalValue: wixFilt.reduce((s: number,t: any) => s+(t.valorOriginal||0),0), pendingValue: wixP.reduce((s: number,t: any) => s+(t.valorOriginal||0),0) });
 
       // Atualizar opções de filtro
       setOptions({
@@ -235,6 +247,10 @@ const Dashboard: React.FC = () => {
       setAllFilteredData(allResult.data);
       setTotalPages(result.totalPages);
       setKpi(newKpi);
+      const wixFilt = allResult.data.filter((t: any) => t.source === 'wix');
+      const wixP = wixFilt.filter((t: any) => !['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      const wixD = wixFilt.filter((t: any) => ['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+      setWixStats({ total: wixFilt.length, pending: wixP.length, paid: wixD.length, totalValue: wixFilt.reduce((s: number,t: any) => s+(t.valorOriginal||0),0), pendingValue: wixP.reduce((s: number,t: any) => s+(t.valorOriginal||0),0) });
     }
   }, [filters, page, isLoading, initError]);
 
@@ -439,6 +455,10 @@ const Dashboard: React.FC = () => {
         setAllFilteredData(allResult.data);
         setTotalPages(result.totalPages);
         setKpi(newKpi);
+        const wixFilt = allResult.data.filter((t: any) => t.source === 'wix');
+        const wixP = wixFilt.filter((t: any) => !['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+        const wixD = wixFilt.filter((t: any) => ['pago','recebido','sim','ok','liquidado','quitado'].includes((t.status||'').toLowerCase()));
+        setWixStats({ total: wixFilt.length, pending: wixP.length, paid: wixD.length, totalValue: wixFilt.reduce((s: number,t: any) => s+(t.valorOriginal||0),0), pendingValue: wixP.reduce((s: number,t: any) => s+(t.valorOriginal||0),0) });
       } catch (err) {
         console.error('Erro ao dar baixa:', err);
         alert('Erro ao dar baixa. Tente novamente.');
