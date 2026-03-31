@@ -257,7 +257,12 @@ app.post('/', upload.any(), async (req, res) => {
         for (const d of matchDocs) {
           const docId = d.document.name.split('/').pop();
           const sheetRow = parseInt(docId.replace('trx-', ''));
-          await updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId);
+          const rowIndex = sheetRow + 1; // rowIndex = planilha linha real
+          // Atualiza planilha E Firestore para evitar que onSheetChange reverta
+          await Promise.all([
+            updateSheets(rowIndex, 'Pago', valorRef, dataPgto),
+            updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId),
+          ]);
           trxIds.push(docId);
         }
         console.log('BAIXA RECEBER OK:', movimentacao, '->', trxIds.join(', '));
