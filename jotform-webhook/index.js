@@ -74,23 +74,21 @@ function findRowInData(rows, movimentacao, dataVenc, searchFromBottom) {
 }
 
 async function updateSheetsEntrada(rowIndex, status, valorPago, dataRecebimento) {
-  // Para Entradas: status na col AJ (índice 35), data recebimento na col X (índice 23)
   const sheets = await getSheetsClient();
-  // Atualiza col AJ (status Doc.Pago - Receber)
-  await sheets.spreadsheets.values.update({
+  // Escreve SIM na col J (Saída) E col AJ (Entrada) — Apps Script pode classificar de qualquer forma
+  await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
-    range: `'${SHEET_NAME}'!AJ${rowIndex}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[status]] },
+    requestBody: {
+      valueInputOption: 'USER_ENTERED',
+      data: [
+        { range: `'${SHEET_NAME}'!J${rowIndex}`, values: [[status]] },
+        { range: `'${SHEET_NAME}'!AJ${rowIndex}`, values: [[status]] },
+        { range: `'${SHEET_NAME}'!X${rowIndex}`, values: [[dataRecebimento || '']] },
+        { range: `'${SHEET_NAME}'!K${rowIndex}`, values: [[dataRecebimento || '']] },
+      ]
+    }
   });
-  // Atualiza col X (data recebimento) e col N (valor pago)
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `'${SHEET_NAME}'!X${rowIndex}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[dataRecebimento || '']] },
-  });
-  console.log(`Sheets Entrada atualizado: linha ${rowIndex} | AJ=${status} | X=${dataRecebimento}`);
+  console.log(`Sheets Entrada atualizado: linha ${rowIndex} | J=AJ=${status}`);
 }
 
 async function updateSheets(rowIndex, status, valorPago, dataPgto) {
