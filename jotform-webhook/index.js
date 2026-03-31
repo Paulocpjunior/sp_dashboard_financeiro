@@ -130,6 +130,36 @@ async function updateFirestore(sheetRow, status, valorPago, dataPgto, submission
   console.log(`Firestore PATCH: ${docId}`);
 }
 
+async function updateFirestoreEntrada(sheetRow, status, valorRecebido, dataPgto, submissionId) {
+  // Para Contas a Receber: atualiza valueReceived (coluna RECEBIDO no dashboard)
+  const docId = `trx-${sheetRow}`;
+  const token = await getFirestoreToken();
+  // Parse valor: "1.821,00" → 1821.00
+  const parseValor = (v) => {
+    if (!v) return 0;
+    return parseFloat(String(v).replace(/\./g, '').replace(',', '.')) || 0;
+  };
+  const valorNum = parseValor(valorRecebido);
+  const fields = {
+    pago:          { stringValue: status },
+    status:        { stringValue: status },
+    valueReceived: { doubleValue: valorNum },
+    valorPago:     { stringValue: valorRecebido ? String(valorRecebido) : '' },
+    dataPagamento: { stringValue: dataPgto || '' },
+    paymentDate:   { stringValue: toBrDate(dataPgto) },
+  };
+  if (submissionId) fields.submissionId = { stringValue: String(submissionId) };
+  const updateMask = Object.keys(fields).map(f => `updateMask.fieldPaths=${f}`).join('&');
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}?${updateMask}`;
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fields }),
+  });
+  if (!resp.ok) throw new Error(`Firestore PATCH Entrada falhou (${docId}): ${await resp.text()}`);
+  console.log(`Firestore PATCH Entrada: ${docId} | valueReceived: ${valorNum}`);
+}
+
 async function createFirestoreDocument(sheetRow, rowData, movimentacao, valorRef, dataAPagar, submissionId) {
   const docId = `trx-${sheetRow}`;
   const token = await getFirestoreToken();
@@ -280,8 +310,8 @@ app.post('/', upload.any(), async (req, res) => {
           await updateSheetsEntrada(rowIndex, 'SIM', valorRef, dataPgto);
           // Aguarda Apps Script processar (evita race condition)
           await new Promise(r => setTimeout(r, 4000));
-          // Confirma Pago no Firestore (garante consistência mesmo se Apps Script demorar)
-          await updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId);
+          // Confirma Pago no Firestore com valueReceived preenchido
+          await updateFirestoreEntrada(sheetRow, 'Pago', valorRef, dataPgto, submissionId);
           trxIds.push(docId);
         }
         console.log('BAIXA RECEBER OK:', movimentacao, '->', trxIds.join(', '));
