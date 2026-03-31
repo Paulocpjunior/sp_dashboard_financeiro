@@ -184,7 +184,7 @@ app.post('/', upload.any(), async (req, res) => {
     console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar, submissionId });
 
     if (!movimentacao) {
-      console.error('Movimentacao ausente — payload inválido');
+      console.error('Movimentacao ausente — DUMP COMPLETO DOS CAMPOS:', JSON.stringify(raw, null, 2));
       return res.status(400).json({ error: 'Movimentacao ausente' });
     }
 
