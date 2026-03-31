@@ -221,21 +221,46 @@ app.post('/', upload.any(), async (req, res) => {
     if (docPago === 'SIM') {
       const dataPgto = dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR');
 
-      // Contas a Receber: usa IDs únicos do JotForm (ex: SP-CX43326) para achar trx no Firestore
+      // Contas a Receber: busca no Firestore por nome do cliente + data de vencimento
       if (isContasReceber) {
-        const extractNum = (s) => { const m = String(s||'').match(/(\d+)$/); return m ? parseInt(m[1]) : null; };
-        const num1 = extractNum(raw.q285_identificacaoUnica285);
-        const num2 = extractNum(raw.q284_identificacaoUnica);
-        const nums = [...new Set([num1, num2].filter(n => n !== null))];
-        if (nums.length === 0) {
-          console.error('IDs únicos ausentes no payload Contas a Receber');
-          return res.status(400).json({ error: 'ID unico ausente' });
+        const dueDateISO = toBrDate(dataAPagar);
+        const token = await getFirestoreToken();
+        const queryUrl = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
+        const queryBody = {
+          structuredQuery: {
+            from: [{ collectionId: 'transactions' }],
+            where: {
+              compositeFilter: {
+                op: 'AND',
+                filters: [
+                  { fieldFilter: { field: { fieldPath: 'client' }, op: 'EQUAL', value: { stringValue: movimentacao } } },
+                  { fieldFilter: { field: { fieldPath: 'dueDate' }, op: 'EQUAL', value: { stringValue: dueDateISO } } },
+                  { fieldFilter: { field: { fieldPath: 'movement' }, op: 'EQUAL', value: { stringValue: 'Entrada' } } },
+                ]
+              }
+            },
+            limit: 10
+          }
+        };
+        const qResp = await fetch(queryUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(queryBody),
+        });
+        const qData = await qResp.json();
+        const matchDocs = qData.filter(d => d.document);
+        if (matchDocs.length === 0) {
+          console.error('Contas a Receber nao encontrada:', movimentacao, dueDateISO);
+          return res.status(404).json({ error: 'Transacao nao encontrada', movimentacao, dueDateISO });
         }
-        for (const num of nums) {
-          await updateFirestore(num, 'Pago', valorRef, dataPgto, submissionId);
+        const trxIds = [];
+        for (const d of matchDocs) {
+          const docId = d.document.name.split('/').pop();
+          const sheetRow = parseInt(docId.replace('trx-', ''));
+          await updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId);
+          trxIds.push(docId);
         }
-        const trxIds = nums.map(n => 'trx-' + n);
-        console.log('BAIXA RECEBER OK:', movimentacao, '→', trxIds.join(', '));
+        console.log('BAIXA RECEBER OK:', movimentacao, '->', trxIds.join(', '));
         return res.status(200).json({ status: 'payment_receber_updated', movimentacao, trxIds, submissionId });
       }
 
