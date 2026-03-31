@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Transaction } from '../types';
 import { ChevronLeft, ChevronRight, ArrowUpCircle, ArrowDownCircle, AlertTriangle, Search, Loader2, AlertCircle, ChevronUp, ChevronDown, ChevronsUpDown, Download, X, CheckSquare, Square, CheckCircle2, Filter, Key, FileText, Save, ArrowRight, ShieldCheck, Ban, Info } from 'lucide-react';
@@ -915,7 +914,7 @@ const DataTable: React.FC<DataTableProps> = ({
                             title={row.description || row.client || '-'}
                             onClick={() => onClientClick && onClientClick(row.client)}
                           >
-                            {row.description || row.client || '-'}
+                            <>{row.description || row.client || '-'}{row.source === 'wix' && <span style={{background:'#0062FF',color:'white',fontSize:'9px',fontWeight:700,padding:'1px 5px',borderRadius:'3px',marginLeft:'4px',verticalAlign:'middle'}}>WIX</span>}</>
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">
                             {row.cpfCnpj || '-'}
@@ -986,7 +985,7 @@ const DataTable: React.FC<DataTableProps> = ({
                             title={row.client || '-'}
                             onClick={() => onClientClick && onClientClick(row.client)}
                           >
-                            {row.client || '-'}
+                            <>{row.client || '-'}{row.source === 'wix' && <span style={{background:'#0062FF',color:'white',fontSize:'9px',fontWeight:700,padding:'1px 5px',borderRadius:'3px',marginLeft:'4px',verticalAlign:'middle'}}>WIX</span>}</>
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-center text-xs font-bold text-blue-600 dark:text-blue-400">
                             {row.clientNumber ?? '-'}
@@ -1065,7 +1064,7 @@ const DataTable: React.FC<DataTableProps> = ({
                             className="px-2 py-2 text-slate-900 dark:text-slate-100 font-medium truncate max-w-[180px] cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
                             onClick={() => onClientClick && onClientClick(row.client)}
                           >
-                            {isRowSaida ? (row.description || row.client || '-') : (row.client || '-')}
+                            <>{isRowSaida ? (row.description || row.client || '-') : (row.client || '-')}{row.source === 'wix' && <span style={{background:'#0062FF',color:'white',fontSize:'9px',fontWeight:700,padding:'1px 5px',borderRadius:'3px',marginLeft:'4px',verticalAlign:'middle'}}>WIX</span>}</>
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">
                             {row.cpfCnpj || '-'}
