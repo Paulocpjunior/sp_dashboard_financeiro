@@ -541,16 +541,11 @@ export const DataService = {
       if (['saida','despesa','debito','nao','não','n'].includes(mLower)) return 'Saída';
       return s.trim();
     };
-    const normalizeTypeVal = (s: string): string => {
-      const v = s.toLowerCase().trim();
-      if (v.includes('wix') || v.includes('cartao') || v.includes('cartão')) return 'Entrada de Caixa / Contas a Receber';
-      return s.trim();
-    };
+
     const rawValues = CACHED_TRANSACTIONS.map(t => String(t[field] || '').trim()).filter(Boolean);
     let normalized = rawValues;
     if (field === 'status') normalized = rawValues.map(normalizeStatusVal);
     if (field === 'movement') normalized = rawValues.map(normalizeMovementVal);
-    if (field === 'type') normalized = rawValues.map(normalizeTypeVal);
     const values = new Set(normalized);
     return Array.from(values).sort();
   },
