@@ -73,6 +73,26 @@ function findRowInData(rows, movimentacao, dataVenc, searchFromBottom) {
   return matchingRows.length > 0 ? matchingRows[0] : null;
 }
 
+async function updateSheetsEntrada(rowIndex, status, valorPago, dataRecebimento) {
+  // Para Entradas: status na col AJ (índice 35), data recebimento na col X (índice 23)
+  const sheets = await getSheetsClient();
+  // Atualiza col AJ (status Doc.Pago - Receber)
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${SHEET_NAME}'!AJ${rowIndex}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[status]] },
+  });
+  // Atualiza col X (data recebimento) e col N (valor pago)
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${SHEET_NAME}'!X${rowIndex}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[dataRecebimento || '']] },
+  });
+  console.log(`Sheets Entrada atualizado: linha ${rowIndex} | AJ=${status} | X=${dataRecebimento}`);
+}
+
 async function updateSheets(rowIndex, status, valorPago, dataPgto) {
   const sheets = await getSheetsClient();
   await sheets.spreadsheets.values.update({
@@ -258,9 +278,9 @@ app.post('/', upload.any(), async (req, res) => {
           const docId = d.document.name.split('/').pop();
           const sheetRow = parseInt(docId.replace('trx-', ''));
           const rowIndex = sheetRow + 1; // rowIndex = planilha linha real
-          // Escreve "SIM" na col J para que o Apps Script normalize corretamente para "Pago"
+          // Entradas: escreve SIM na col AJ e data na col X
           await Promise.all([
-            updateSheets(rowIndex, 'SIM', valorRef, dataPgto),
+            updateSheetsEntrada(rowIndex, 'SIM', valorRef, dataPgto),
             updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId),
           ]);
           trxIds.push(docId);
