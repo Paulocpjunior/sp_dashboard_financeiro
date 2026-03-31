@@ -45,7 +45,7 @@ const Dashboard: React.FC = () => {
   const [allFilteredData, setAllFilteredData] = useState<Transaction[]>([]);
   const [totalPages, setTotalPages] = useState(1);
   const [kpi, setKpi] = useState<KPIData>({ totalPaid: 0, totalReceived: 0, balance: 0 });
-  const [wixData, setWixData] = useState<{ total: number; pending: number; paid: number; totalValue: number; pendingValue: number }>({ total: 0, pending: 0, paid: 0, totalValue: 0, pendingValue: 0 });
+  const [wixStats, setWixStats] = useState({ total: 0, pending: 0, paid: 0, totalValue: 0, pendingValue: 0 });
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [showAdvancedDates, setShowAdvancedDates] = useState(false);
   const [activePeriod, setActivePeriod] = useState<string>('thisMonth');
@@ -107,6 +107,7 @@ const Dashboard: React.FC = () => {
 
         // Registrar timestamp da primeira carga
         setLastUpdated(DataService.getLastUpdatedAt());
+        setWixStats(DataService.getWixStats());
 
         // Aplicar filtro "Este Mês" por padrão
         const now = new Date();
@@ -124,18 +125,6 @@ const Dashboard: React.FC = () => {
         // Initial fetch
         const { result, kpi: newKpi } = DataService.getTransactions(initialFilters, page);
         const { result: allResult } = DataService.getTransactions(initialFilters, 1, 999999);
-        // Calcula dados Wix
-        const allTrx = DataService.getTransactions({}, 1, 999999).result;
-        const wixTrx = allTrx.filter((t: any) => t.source === 'wix');
-        const wixPending = wixTrx.filter((t: any) => t.status !== 'Pago');
-        const wixPaid = wixTrx.filter((t: any) => t.status === 'Pago');
-        setWixData({
-          total: wixTrx.length,
-          pending: wixPending.length,
-          paid: wixPaid.length,
-          totalValue: wixTrx.reduce((s: number, t: any) => s + (t.valorOriginal || 0), 0),
-          pendingValue: wixPending.reduce((s: number, t: any) => s + (t.valorOriginal || 0), 0),
-        });
         setData(result.data);
         setAllFilteredData(allResult.data);
         setTotalPages(result.totalPages);
@@ -1075,37 +1064,37 @@ const Dashboard: React.FC = () => {
            </div>
 
            {/* SEÇÃO FATURAS WIX */}
-           {wixData.total > 0 && (
+           {wixStats.total > 0 && (
              <div className="lg:col-span-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
                  <div className="flex items-center gap-3">
-                   <span style={{background:'#0062FF', color:'white', fontSize:'11px', fontWeight:700, padding:'3px 8px', borderRadius:'4px', letterSpacing:'0.5px'}}>WIX</span>
+                   <span style={{background:'#0062FF',color:'white',fontSize:'11px',fontWeight:700,padding:'3px 8px',borderRadius:'4px',letterSpacing:'0.5px'}}>WIX</span>
                    <h3 className="text-base font-semibold text-slate-800 dark:text-white">Faturas Wix</h3>
                    <span className="text-xs text-slate-400 dark:text-slate-500">Cobrança Online</span>
                  </div>
-                 <span className="text-xs text-slate-400">{wixData.total} fatura{wixData.total !== 1 ? 's' : ''}</span>
+                 <span className="text-xs text-slate-400">{wixStats.total} fatura{wixStats.total !== 1 ? 's' : ''}</span>
                </div>
                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100 dark:divide-slate-800">
                  <div className="px-6 py-4">
                    <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">Total Emitido</p>
-                   <p className="text-lg font-bold text-slate-800 dark:text-white">{new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(wixData.totalValue)}</p>
-                   <p className="text-xs text-slate-400 mt-0.5">{wixData.total} faturas</p>
+                   <p className="text-lg font-bold text-slate-800 dark:text-white">{new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(wixStats.totalValue)}</p>
+                   <p className="text-xs text-slate-400 mt-0.5">{wixStats.total} faturas</p>
                  </div>
                  <div className="px-6 py-4">
                    <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">A Receber</p>
-                   <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(wixData.pendingValue)}</p>
-                   <p className="text-xs text-slate-400 mt-0.5">{wixData.pending} pendente{wixData.pending !== 1 ? 's' : ''}</p>
+                   <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(wixStats.pendingValue)}</p>
+                   <p className="text-xs text-slate-400 mt-0.5">{wixStats.pending} pendente{wixStats.pending !== 1 ? 's' : ''}</p>
                  </div>
                  <div className="px-6 py-4">
-                   <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">Pagas</p>
-                   <p className="text-lg font-bold text-green-600 dark:text-green-400">{new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL'}).format(wixData.totalValue - wixData.pendingValue)}</p>
-                   <p className="text-xs text-slate-400 mt-0.5">{wixData.paid} fatura{wixData.paid !== 1 ? 's' : ''}</p>
+                   <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">Recebido</p>
+                   <p className="text-lg font-bold text-green-600 dark:text-green-400">{new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(wixStats.totalValue - wixStats.pendingValue)}</p>
+                   <p className="text-xs text-slate-400 mt-0.5">{wixStats.paid} paga{wixStats.paid !== 1 ? 's' : ''}</p>
                  </div>
                  <div className="px-6 py-4">
                    <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">Taxa Recebimento</p>
-                   <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{wixData.total > 0 ? Math.round((wixData.paid / wixData.total) * 100) : 0}%</p>
-                   <div className="mt-1 bg-slate-100 dark:bg-slate-700 rounded-full h-1.5">
-                     <div className="bg-blue-500 h-1.5 rounded-full" style={{width: `${wixData.total > 0 ? Math.round((wixData.paid/wixData.total)*100) : 0}%`}} />
+                   <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{wixStats.total > 0 ? Math.round((wixStats.paid/wixStats.total)*100) : 0}%</p>
+                   <div className="mt-1.5 bg-slate-100 dark:bg-slate-700 rounded-full h-1.5">
+                     <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{width:`${wixStats.total > 0 ? Math.round((wixStats.paid/wixStats.total)*100) : 0}%`}} />
                    </div>
                  </div>
                </div>
