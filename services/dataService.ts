@@ -660,6 +660,10 @@ export const DataService = {
           
           if (filters.client && !item.client.toLowerCase().includes(filters.client.toLowerCase())) matches = false;
 
+          // Filtro por fonte (wix / planilha)
+          if (filters.source === 'wix' && item.source !== 'wix') matches = false;
+          if (filters.source === 'planilha' && item.source === 'wix') matches = false;
+
           if (filters.search) {
             const searchLower = filters.search.toLowerCase();
             const rowString = Object.values(item).join(' ').toLowerCase();
