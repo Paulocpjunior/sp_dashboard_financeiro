@@ -254,7 +254,13 @@ app.post('/', upload.any(), async (req, res) => {
     }
 
     // CASO 2: Novo lançamento (Doc.Pago = NÃO / vazio)
-    // Busca de baixo pra cima — JotForm acabou de inserir a linha
+    // Contas a Receber: o Apps Script onSheetChange já sincroniza automaticamente — não criar aqui
+    if (isContasReceber) {
+      console.log('Contas a Receber novo lançamento — delegado ao Apps Script:', movimentacao);
+      return res.status(200).json({ status: 'delegated_to_apps_script', movimentacao });
+    }
+
+    // Busca de baixo pra cima — JotForm acabou de inserir a linha (Contas a Pagar)
     const match = findRowInData(allRows, movimentacao, dataAPagar, true);
     if (!match) {
       console.warn('Linha não encontrada ainda, criando com dados mínimos do JotForm:', movimentacao);
