@@ -175,16 +175,35 @@ app.post('/', upload.any(), async (req, res) => {
     }
 
     const submissionId = raw.submissionID || topBody.submissionID || raw.submission_id || topBody.submission_id || null;
-    const docPago      = (raw.q291_docpago || '').toString().toUpperCase().trim();
-    const movimentacao = (raw.q44_movimentacao44 || '').toString().trim();
-    const valorRef     = raw.q56_valorRefvalor56 || raw.q57_valorPago || '';
-    const dataAPagar   = parseJotformDate(raw.q313_dataA);
-    const dataBaixa    = parseJotformDate(raw.q129_dataBaixa);
 
-    console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar, submissionId });
+    // Detecta qual formulário enviou: Contas a Receber usa q314_docpago314, Contas a Pagar usa q291_docpago
+    const isContasReceber = !!raw.q314_docpago314 || !!raw.q169_nomeEmpresa || !!raw.q262_dataVencimentoreceber;
+
+    const docPago = isContasReceber
+      ? (raw.q314_docpago314 || '').toString().toUpperCase().trim()
+      : (raw.q291_docpago || '').toString().toUpperCase().trim();
+
+    const movimentacao = isContasReceber
+      ? (raw.q169_nomeEmpresa || '').toString().trim()
+      : (raw.q44_movimentacao44 || '').toString().trim();
+
+    const valorRef = isContasReceber
+      ? (raw.q252_valorRecebido || raw.q279_totalCobranca279 || '')
+      : (raw.q56_valorRefvalor56 || raw.q57_valorPago || '');
+
+    const dataAPagar = isContasReceber
+      ? parseJotformDate(raw.q262_dataVencimentoreceber)
+      : parseJotformDate(raw.q313_dataA);
+
+    const dataBaixa = isContasReceber
+      ? parseJotformDate(raw.q263_dataRecebimento)
+      : parseJotformDate(raw.q129_dataBaixa);
+
+    console.log('Formulário:', isContasReceber ? 'Contas a Receber' : 'Contas a Pagar');
+    console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar, dataBaixa, submissionId });
 
     if (!movimentacao) {
-      console.error('Movimentacao ausente — DUMP COMPLETO DOS CAMPOS:', JSON.stringify(raw, null, 2));
+      console.error('Movimentacao ausente — DUMP:', JSON.stringify(raw, null, 2));
       return res.status(400).json({ error: 'Movimentacao ausente' });
     }
 
