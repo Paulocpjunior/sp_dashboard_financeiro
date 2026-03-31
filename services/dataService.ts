@@ -542,10 +542,12 @@ export const DataService = {
       return s.trim();
     };
 
+    const INVALID_TYPES = ['1- Paulo- Retirada', '1- Paulo-Retirada', '2- SP - Retirada', '2- SP-Retirada', '1- Paulo - Retirada'];
     const rawValues = CACHED_TRANSACTIONS.map(t => String(t[field] || '').trim()).filter(Boolean);
     let normalized = rawValues;
     if (field === 'status') normalized = rawValues.map(normalizeStatusVal);
     if (field === 'movement') normalized = rawValues.map(normalizeMovementVal);
+    if (field === 'type') normalized = rawValues.filter(v => !INVALID_TYPES.includes(v));
     const values = new Set(normalized);
     return Array.from(values).sort();
   },
