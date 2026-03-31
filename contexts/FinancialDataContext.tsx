@@ -70,6 +70,8 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
       setLastUpdated(DataService.getLastUpdatedAt());
       // Initial load with empty filters
       applyFilters({}, 1);
+      // Start real-time Firebase listener after initial load
+      DataService.subscribeToFirebaseChanges();
     } catch (err: any) {
       setError(err.message || "Falha ao carregar dados.");
     } finally {
@@ -97,14 +99,25 @@ export const FinancialDataProvider: React.FC<{ children: React.ReactNode }> = ({
     applyFilters({}, 1);
   }, [applyFilters]);
 
-  // Listen for DataService updates (auto-refresh)
+  // Listen for DataService updates (auto-refresh from Firebase onSnapshot)
+  const currentFiltersRef = React.useRef<Partial<FilterState>>({});
+  const currentPageRef = React.useRef<number>(1);
+
+  // Wrap applyFilters to track current filters/page
+  const applyFiltersTracked = useCallback((filters: Partial<FilterState>, page: number) => {
+    currentFiltersRef.current = filters;
+    currentPageRef.current = page;
+    applyFilters(filters, page);
+  }, [applyFilters]);
+
   useEffect(() => {
     const unsubscribe = DataService.onRefresh(() => {
       setLastUpdated(DataService.getLastUpdatedAt());
-      // When data refreshes, we might want to notify the UI
+      // Re-apply current filters so the UI shows the updated data
+      applyFilters(currentFiltersRef.current, currentPageRef.current);
     });
     return unsubscribe;
-  }, []);
+  }, [applyFilters]);
 
   const value = {
     transactions,

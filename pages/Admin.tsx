@@ -6,7 +6,7 @@ import { BackendService } from '../services/backendService';
 import { DataService } from '../services/dataService';
 import { User as UserType, Transaction } from '../types';
 import { MOCK_USERS, APPS_SCRIPT_URL } from '../constants';
-import { collection, getDocs, writeBatch, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, doc, setDoc, updateDoc, deleteDoc, addDoc } from 'firebase/firestore';
 import { db } from '../services/firebaseConfig';
 
 
@@ -120,7 +120,7 @@ const Admin: React.FC = () => {
     setTxSearched(false);
     setTxResults([]);
     try {
-      const all = DataService.getCachedData();
+      const all = DataService.getTransactions({}, 1, 999999).result.data;
       const q = txSearch.toLowerCase();
       const found = all.filter(t =>
         t.description?.toLowerCase().includes(q) ||
