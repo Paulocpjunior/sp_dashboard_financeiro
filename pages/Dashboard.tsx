@@ -28,6 +28,7 @@ const INITIAL_FILTERS: FilterState = {
   paidBy: '',
   movement: '',
   search: '',
+  source: '',
 };
 
 // Função para normalizar texto (remove acentos)
@@ -943,6 +944,23 @@ const Dashboard: React.FC = () => {
                 </select>
               </div>
 
+              {/* FONTE */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase flex items-center gap-1">
+                  Fonte
+                  {filters.source === 'wix' && <span style={{background:'#0062FF',color:'white',fontSize:'8px',fontWeight:700,padding:'1px 4px',borderRadius:'3px'}}>WIX</span>}
+                </label>
+                <select
+                  className="w-full form-select rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm focus:ring-blue-500 focus:border-blue-500"
+                  value={filters.source || ''}
+                  onChange={(e) => handleFilterChange('source', e.target.value)}
+                >
+                  <option value="">Todas as Fontes</option>
+                  <option value="wix">🔵 Wix (Fatura Online)</option>
+                  <option value="planilha">📊 Planilha / JotForm</option>
+                </select>
+              </div>
+
               {/* NOME EMPRESA / CREDOR */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Empresa / Credor</label>
@@ -1072,7 +1090,12 @@ const Dashboard: React.FC = () => {
                    <h3 className="text-base font-semibold text-slate-800 dark:text-white">Faturas Wix</h3>
                    <span className="text-xs text-slate-400 dark:text-slate-500">Cobrança Online</span>
                  </div>
-                 <span className="text-xs text-slate-400">{wixStats.total} fatura{wixStats.total !== 1 ? 's' : ''}</span>
+                 <button
+                   onClick={() => handleFilterChange('source', filters.source === 'wix' ? '' : 'wix')}
+                   className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${filters.source === 'wix' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-blue-50'}`}
+                 >
+                   {filters.source === 'wix' ? '✓ Filtrando por Wix' : `Ver ${wixStats.total} faturas`}
+                 </button>
                </div>
                <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-slate-100 dark:divide-slate-800">
                  <div className="px-6 py-4">
@@ -1083,18 +1106,18 @@ const Dashboard: React.FC = () => {
                  <div className="px-6 py-4">
                    <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">A Receber</p>
                    <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(wixStats.pendingValue)}</p>
-                   <p className="text-xs text-slate-400 mt-0.5">{wixStats.pending} pendente{wixStats.pending !== 1 ? 's' : ''}</p>
+                   <p className="text-xs text-slate-400 mt-0.5">{wixStats.pending} pendentes</p>
                  </div>
                  <div className="px-6 py-4">
                    <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">Recebido</p>
                    <p className="text-lg font-bold text-green-600 dark:text-green-400">{new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(wixStats.totalValue - wixStats.pendingValue)}</p>
-                   <p className="text-xs text-slate-400 mt-0.5">{wixStats.paid} paga{wixStats.paid !== 1 ? 's' : ''}</p>
+                   <p className="text-xs text-slate-400 mt-0.5">{wixStats.paid} pagas</p>
                  </div>
                  <div className="px-6 py-4">
                    <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold mb-1">Taxa Recebimento</p>
                    <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{wixStats.total > 0 ? Math.round((wixStats.paid/wixStats.total)*100) : 0}%</p>
                    <div className="mt-1.5 bg-slate-100 dark:bg-slate-700 rounded-full h-1.5">
-                     <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{width:`${wixStats.total > 0 ? Math.round((wixStats.paid/wixStats.total)*100) : 0}%`}} />
+                     <div className="bg-blue-500 h-1.5 rounded-full" style={{width:`${wixStats.total > 0 ? Math.round((wixStats.paid/wixStats.total)*100) : 0}%`}} />
                    </div>
                  </div>
                </div>
