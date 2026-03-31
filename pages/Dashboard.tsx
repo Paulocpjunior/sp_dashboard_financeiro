@@ -1160,6 +1160,7 @@ const Dashboard: React.FC = () => {
                 onIdFilterChange={(val) => handleFilterChange('id', val)}
                 isLoading={isLoading}
                 selectedType={filters.type}
+                selectedSource={filters.source || ''}
                 onClientClick={(name) => setSelectedClient(name)}
               />
            </div>
