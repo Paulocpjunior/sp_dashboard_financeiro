@@ -258,9 +258,9 @@ app.post('/', upload.any(), async (req, res) => {
           const docId = d.document.name.split('/').pop();
           const sheetRow = parseInt(docId.replace('trx-', ''));
           const rowIndex = sheetRow + 1; // rowIndex = planilha linha real
-          // Atualiza planilha E Firestore para evitar que onSheetChange reverta
+          // Escreve "SIM" na col J para que o Apps Script normalize corretamente para "Pago"
           await Promise.all([
-            updateSheets(rowIndex, 'Pago', valorRef, dataPgto),
+            updateSheets(rowIndex, 'SIM', valorRef, dataPgto),
             updateFirestore(sheetRow, 'Pago', valorRef, dataPgto, submissionId),
           ]);
           trxIds.push(docId);
