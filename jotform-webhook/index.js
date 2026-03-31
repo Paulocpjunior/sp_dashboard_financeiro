@@ -277,7 +277,7 @@ app.post('/', upload.any(), async (req, res) => {
         for (const d of matchDocs) {
           const docId = d.document.name.split('/').pop();
           const sheetRow = parseInt(docId.replace('trx-', ''));
-          const rowIndex = sheetRow + 1; // rowIndex = planilha linha real
+          const rowIndex = sheetRow + 2; // trx-N = linha N+2 (header na linha 1, dados a partir da linha 2)
           // Entradas: escreve SIM na col AJ e data na col X
           await Promise.all([
             updateSheetsEntrada(rowIndex, 'SIM', valorRef, dataPgto),
