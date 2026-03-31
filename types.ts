@@ -1,4 +1,3 @@
-
 export type UserRole = 'admin' | 'operacional';
 
 export interface User {
@@ -35,6 +34,9 @@ export interface Transaction {
   observacaoAPagar?: string; // Coluna R da Planilha
   clientNumber?: number; // N.Cliente — Coluna Y da Planilha (índice 24)
   isExcluded?: boolean; // Marcação de exclusão lógica
+  source?: string; // 'wix' para faturas importadas do Wix, vazio para planilha/JotForm
+  valorOriginal?: number; // Valor original da fatura Wix
+  wixInvoiceNumber?: string; // Número da fatura no Wix
 }
 
 export interface FilterState {
@@ -54,6 +56,7 @@ export interface FilterState {
   paidBy: string;
   movement: string;
   search: string;
+  source?: string; // Filtro por fonte: 'wix' ou 'planilha'
 }
 
 export interface KPIData {
