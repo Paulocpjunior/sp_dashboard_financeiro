@@ -166,6 +166,13 @@ async function createFirestoreDocument(sheetRow, rowData, movimentacao, valorRef
   console.log(`Firestore CRIADO: ${docId} | ${description} | venc: ${dueDateISO}`);
 }
 
+// Extrai número do trx a partir do ID único do JotForm (ex: "SP-CX43326" → "trx-43326")
+function extractTrxId(idUnico) {
+  if (!idUnico) return null;
+  const match = idUnico.toString().match(/(\d+)$/);
+  return match ? `trx-${match[1]}` : null;
+}
+
 app.post('/', upload.any(), async (req, res) => {
   try {
     const topBody = req.body || {};
@@ -212,17 +219,37 @@ app.post('/', upload.any(), async (req, res) => {
 
     // CASO 1: Baixa de pagamento (Doc.Pago = SIM)
     if (docPago === 'SIM') {
+      const dataPgto = dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR');
+
+      // Contas a Receber: usa IDs únicos do JotForm (ex: SP-CX43326) para achar trx no Firestore
+      if (isContasReceber) {
+        const extractNum = (s) => { const m = String(s||'').match(/(\d+)$/); return m ? parseInt(m[1]) : null; };
+        const num1 = extractNum(raw.q285_identificacaoUnica285);
+        const num2 = extractNum(raw.q284_identificacaoUnica);
+        const nums = [...new Set([num1, num2].filter(n => n !== null))];
+        if (nums.length === 0) {
+          console.error('IDs únicos ausentes no payload Contas a Receber');
+          return res.status(400).json({ error: 'ID unico ausente' });
+        }
+        for (const num of nums) {
+          await updateFirestore(num, 'Pago', valorRef, dataPgto, submissionId);
+        }
+        const trxIds = nums.map(n => 'trx-' + n);
+        console.log('BAIXA RECEBER OK:', movimentacao, '→', trxIds.join(', '));
+        return res.status(200).json({ status: 'payment_receber_updated', movimentacao, trxIds, submissionId });
+      }
+
+      // Contas a Pagar: busca na planilha por movimentação
       const match = findRowInData(allRows, movimentacao, dataAPagar, false);
       if (!match) {
         console.error('Não encontrado para baixa:', movimentacao);
         return res.status(404).json({ error: 'Movimentacao nao encontrada', movimentacao });
       }
-      const dataPgto = dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR');
       await Promise.all([
         updateSheets(match.rowIndex, 'Pago', valorRef, dataPgto),
         updateFirestore(match.sheetRow, 'Pago', valorRef, dataPgto, submissionId),
       ]);
-      console.log(`BAIXA OK: ${movimentacao} → linha ${match.rowIndex}`);
+      console.log('BAIXA OK:', movimentacao, '→ linha', match.rowIndex);
       return res.status(200).json({ status: 'payment_updated', movimentacao, rowIndex: match.rowIndex, submissionId });
     }
 
