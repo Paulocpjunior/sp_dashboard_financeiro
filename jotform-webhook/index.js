@@ -7,9 +7,10 @@ const upload = multer();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const SPREADSHEET_ID = '17mHd8eqKoj7Cl6E2MCkr0PczFj-lKv_vmFRCY5hypwg';
-const SHEET_NAME = 'Formulário de Controle de Caixa';
 const PROJECT_ID = process.env.GCP_PROJECT_ID || 'gen-lang-client-0888019226';
+const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
 
 function parseJotformDate(val) {
   if (!val) return null;
@@ -21,12 +22,6 @@ function parseJotformDate(val) {
   return val;
 }
 
-function parseDateToObj(str) {
-  if (!str) return null;
-  const parts = str.includes('/') ? str.split('/') : str.split('-').reverse();
-  return new Date(parts[2], parts[1] - 1, parts[0]);
-}
-
 function toBrDate(str) {
   if (!str) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
@@ -35,72 +30,26 @@ function toBrDate(str) {
   return str;
 }
 
-async function getSheetsClient() {
-  const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
-  return google.sheets({ version: 'v4', auth: await auth.getClient() });
+function parseValor(v) {
+  if (!v) return 0;
+  return parseFloat(String(v).replace(/[R$\s]/g,'').replace(/\./g,'').replace(',','.')) || 0;
 }
 
-async function readFullSheet(sheets) {
-  const resp = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `'${SHEET_NAME}'!A:R`,
-  });
-  return resp.data.values || [];
-}
+// ── Dynamic field scanner (para IDs desconhecidos) ────────────────────────────
+// Varre o raw do JotForm procurando por padrões no nome do campo
 
-function findRowInData(rows, movimentacao, dataVenc, searchFromBottom) {
-  const searchMov = (movimentacao || '').toString().trim().toLowerCase();
-  const matchingRows = [];
-  const indices = searchFromBottom
-    ? Array.from({ length: rows.length - 1 }, (_, i) => rows.length - 1 - i)
-    : Array.from({ length: rows.length - 1 }, (_, i) => i + 1);
-
-  for (const i of indices) {
-    const row = rows[i];
-    if (!row) continue;
-    const cellMov = (row[5] || '').toString().trim().toLowerCase();
-    if (cellMov === searchMov) {
-      if (dataVenc && row[2]) {
-        const rowDate = parseDateToObj(row[2]);
-        const vencDate = parseDateToObj(dataVenc);
-        if (rowDate && vencDate && rowDate.toDateString() === vencDate.toDateString()) {
-          return { rowIndex: i + 1, sheetRow: i, rowData: row };
-        }
-      }
-      matchingRows.push({ rowIndex: i + 1, sheetRow: i, rowData: row });
+function findRawField(raw, ...patterns) {
+  for (const key of Object.keys(raw)) {
+    const lower = key.toLowerCase();
+    if (patterns.some(p => lower.includes(p.toLowerCase()))) {
+      const val = raw[key];
+      if (val !== null && val !== undefined && val !== '') return val;
     }
   }
-  return matchingRows.length > 0 ? matchingRows[0] : null;
+  return null;
 }
 
-async function updateSheetsEntrada(rowIndex, status, valorPago, dataRecebimento) {
-  const sheets = await getSheetsClient();
-  // Escreve SIM na col J (Saída) E col AJ (Entrada) — Apps Script pode classificar de qualquer forma
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      valueInputOption: 'USER_ENTERED',
-      data: [
-        { range: `'${SHEET_NAME}'!J${rowIndex}`, values: [[status]] },
-        { range: `'${SHEET_NAME}'!AJ${rowIndex}`, values: [[status]] },
-        { range: `'${SHEET_NAME}'!X${rowIndex}`, values: [[dataRecebimento || '']] },
-        { range: `'${SHEET_NAME}'!K${rowIndex}`, values: [[dataRecebimento || '']] },
-      ]
-    }
-  });
-  console.log(`Sheets Entrada atualizado: linha ${rowIndex} | J=AJ=${status}`);
-}
-
-async function updateSheets(rowIndex, status, valorPago, dataPgto) {
-  const sheets = await getSheetsClient();
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `'${SHEET_NAME}'!J${rowIndex}:N${rowIndex}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [[status, dataPgto || '', '', '', valorPago || '']] },
-  });
-  console.log(`Sheets atualizado: linha ${rowIndex}`);
-}
+// ── Firestore helpers ─────────────────────────────────────────────────────────
 
 async function getFirestoreToken() {
   const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/datastore'] });
@@ -108,19 +57,23 @@ async function getFirestoreToken() {
   return token.token;
 }
 
-async function updateFirestore(sheetRow, status, valorPago, dataPgto, submissionId) {
-  const docId = `trx-${sheetRow}`;
+async function firestoreSet(docId, fields) {
   const token = await getFirestoreToken();
-  const fields = {
-    pago:          { stringValue: status },
-    status:        { stringValue: status },
-    valorPago:     { stringValue: valorPago ? String(valorPago) : '' },
-    dataPagamento: { stringValue: dataPgto || '' },
-    paymentDate:   { stringValue: toBrDate(dataPgto) },
-  };
-  if (submissionId) fields.submissionId = { stringValue: String(submissionId) };
-  const updateMask = Object.keys(fields).map(f => `updateMask.fieldPaths=${f}`).join('&');
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}?${updateMask}`;
+  const url = `${FIRESTORE_BASE}/transactions/${docId}`;
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fields }),
+  });
+  if (!resp.ok) throw new Error(`Firestore SET falhou (${docId}): ${await resp.text()}`);
+  console.log(`Firestore SET: ${docId}`);
+  return docId;
+}
+
+async function firestorePatch(docId, fields) {
+  const token = await getFirestoreToken();
+  const mask = Object.keys(fields).map(f => `updateMask.fieldPaths=${f}`).join('&');
+  const url = `${FIRESTORE_BASE}/transactions/${docId}?${mask}`;
   const resp = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -128,98 +81,258 @@ async function updateFirestore(sheetRow, status, valorPago, dataPgto, submission
   });
   if (!resp.ok) throw new Error(`Firestore PATCH falhou (${docId}): ${await resp.text()}`);
   console.log(`Firestore PATCH: ${docId}`);
+  return docId;
 }
 
-async function updateFirestoreEntrada(sheetRow, status, valorRecebido, dataPgto, submissionId) {
-  // Para Contas a Receber: atualiza valueReceived (coluna RECEBIDO no dashboard)
-  const docId = `trx-${sheetRow}`;
+async function queryFirestore(filters) {
   const token = await getFirestoreToken();
-  // Parse valor: "1.821,00" → 1821.00
-  const parseValor = (v) => {
-    if (!v) return 0;
-    return parseFloat(String(v).replace(/\./g, '').replace(',', '.')) || 0;
+  const url = `${FIRESTORE_BASE}:runQuery`;
+  const body = {
+    structuredQuery: {
+      from: [{ collectionId: 'transactions' }],
+      where: {
+        compositeFilter: {
+          op: 'AND',
+          filters: filters.map(([field, value]) => ({
+            fieldFilter: {
+              field: { fieldPath: field },
+              op: 'EQUAL',
+              value: { stringValue: value }
+            }
+          }))
+        }
+      },
+      limit: 10
+    }
   };
-  const valorNum = parseValor(valorRecebido);
-  const fields = {
-    pago:          { stringValue: status },
-    status:        { stringValue: status },
-    valueReceived: { doubleValue: valorNum },
-    valorPago:     { stringValue: valorRecebido ? String(valorRecebido) : '' },
-    dataPagamento: { stringValue: dataPgto || '' },
-    paymentDate:   { stringValue: toBrDate(dataPgto) },
-  };
-  if (submissionId) fields.submissionId = { stringValue: String(submissionId) };
-  const updateMask = Object.keys(fields).map(f => `updateMask.fieldPaths=${f}`).join('&');
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}?${updateMask}`;
   const resp = await fetch(url, {
-    method: 'PATCH',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ fields }),
+    body: JSON.stringify(body),
   });
-  if (!resp.ok) throw new Error(`Firestore PATCH Entrada falhou (${docId}): ${await resp.text()}`);
-  console.log(`Firestore PATCH Entrada: ${docId} | valueReceived: ${valorNum}`);
+  const data = await resp.json();
+  return data.filter(d => d.document);
 }
 
-async function createFirestoreDocument(sheetRow, rowData, movimentacao, valorRef, dataAPagar, submissionId) {
-  const docId = `trx-${sheetRow}`;
+// ── NOVO: busca por submissionId ──────────────────────────────────────────────
+
+async function queryBySubmissionId(submissionId, fallback) {
   const token = await getFirestoreToken();
+  const url = `${FIRESTORE_BASE}:runQuery`;
+  // Tenta ambos os nomes de campo: submissionId (novo) e submissionID (legado)
+  for (const fieldName of ['submissionId', 'submissionID']) {
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: 'transactions' }],
+        where: { fieldFilter: {
+          field: { fieldPath: fieldName },
+          op: 'EQUAL',
+          value: { stringValue: String(submissionId) }
+        }},
+        limit: 1
+      }
+    };
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    const found = (data || []).filter(d => d.document);
+    if (found.length > 0) {
+      console.log(`Match por ${fieldName}=${submissionId}`);
+      return found[0];
+    }
+  }
+  // Fallback: docs legados sem submissionId — match por (clientNumber, dueDate, valorRef)
+  if (fallback && fallback.clientNumber && fallback.dueDate) {
+    console.log(`Fallback lookup: cli=${fallback.clientNumber} venc=${fallback.dueDate} valor=${fallback.valorRef}`);
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: 'transactions' }],
+        where: { compositeFilter: {
+          op: 'AND',
+          filters: [
+            { fieldFilter: { field: { fieldPath: 'dueDate' }, op: 'EQUAL', value: { stringValue: String(fallback.dueDate) } } },
+            { fieldFilter: { field: { fieldPath: 'clientNumber' }, op: 'EQUAL', value: { stringValue: String(fallback.clientNumber) } } }
+          ]
+        }},
+        limit: 10
+      }
+    };
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    let found = (data || []).filter(d => d.document);
+    // Tenta tambem clientNumber como integerValue
+    if (found.length === 0) {
+      const body2 = JSON.parse(JSON.stringify(body));
+      body2.structuredQuery.where.compositeFilter.filters[1].fieldFilter.value = { integerValue: String(fallback.clientNumber) };
+      const resp2 = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body2),
+      });
+      const data2 = await resp2.json();
+      found = (data2 || []).filter(d => d.document);
+    }
+    if (found.length > 0) {
+      console.log(`Fallback match: ${found[0].document.name.split('/').pop()}`);
+      return found[0];
+    }
+  }
+  return null;
+}
 
-  const rawDate      = String(rowData[0]  || '');
-  const rawDueDate   = String(rowData[2]  || '');
-  const bankAccount  = String(rowData[3]  || '');
-  const tipo         = String(rowData[4]  || '');
-  const description  = String(rowData[5]  || movimentacao);
-  const client       = String(rowData[6]  || '');
-  const paidBy       = String(rowData[7]  || '');
-  const movement     = String(rowData[8]  || 'Saída');
-  const rawValorOrig = String(rowData[9]  || valorRef || '0');
+function toFields(obj) {
+  const fields = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined) continue;
+    else if (typeof v === 'number') fields[k] = Number.isInteger(v) ? { integerValue: v } : { doubleValue: v };
+    else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
+    else fields[k] = { stringValue: String(v) };
+  }
+  return fields;
+}
 
-  const dateISO    = toBrDate(rawDate.split('T')[0]) || toBrDate(dataAPagar) || new Date().toISOString().split('T')[0];
-  const dueDateISO = toBrDate(rawDueDate) || toBrDate(dataAPagar) || dateISO;
+function generateDocId() {
+  return `trx-jf-${Date.now()}`;
+}
 
-  const valorNum = parseFloat(
-    rawValorOrig.replace(/[R$\s]/g, '').replace('.', '').replace(',', '.') || '0'
-  ) || 0;
+// ── Extrai todos os campos relevantes do raw JotForm ─────────────────────────
+// Centraliza o parsing para reutilizar no UPDATE e no CREATE
 
-  const fields = {
-    id:           { stringValue: docId },
-    date:         { stringValue: dateISO },
-    dueDate:      { stringValue: dueDateISO },
-    bankAccount:  { stringValue: bankAccount },
-    type:         { stringValue: tipo },
-    description:  { stringValue: description },
-    status:       { stringValue: 'Pendente' },
-    pago:         { stringValue: 'Não' },
-    client:       { stringValue: client },
-    paidBy:       { stringValue: paidBy },
-    movement:     { stringValue: movement || 'Saída' },
-    valuePaid:    { doubleValue: valorNum },
-    valueReceived:{ doubleValue: 0 },
-    paymentDate:  { stringValue: '' },
-    dataPagamento:{ stringValue: '' },
-    valorPago:    { stringValue: '' },
-    rowIndex:     { integerValue: sheetRow },
-    source:       { stringValue: 'jotform' },
+function extractContasReceber(raw) {
+  const nomeEmpresa  = (raw.q169_nomeEmpresa || '').toString().trim();
+  const docPago      = (raw.q314_docpago314  || '').toString().toUpperCase().trim();
+  const valorRecebido = raw.q252_valorRecebido || raw.q279_totalCobranca279 || '';
+  const dataVenc     = parseJotformDate(raw.q262_dataVencimentoreceber);
+  const dataReceb    = parseJotformDate(raw.q263_dataRecebimento);
+
+  // Dynamic scan para campos sem ID fixo conhecido
+  const honorariosRaw = findRawField(raw, 'honorar', 'honora');
+  const extrasRaw     = findRawField(raw, 'valorextra', 'extras', 'valorExtra');
+  const nClienteRaw   = findRawField(raw, 'ncliente', 'nclient', 'codigoempresa', 'codigocliente', 'clientenum');
+  const cnpjRaw       = findRawField(raw, 'cnpj', 'cpfcnpj', 'cpf_cnpj');
+  const metodoRaw     = findRawField(raw, 'metodopag', 'metodoenv', 'recebivelmetodo', 'recebivel');
+  const obsRaw        = findRawField(raw, 'observac', 'obs_');
+  const cobrancaExtra = findRawField(raw, 'cobrancaextra', 'cobextra', 'cobrancas');
+
+  console.log('[CR] Dynamic scan:', {
+    honorariosRaw, extrasRaw, nClienteRaw, cnpjRaw, metodoRaw
+  });
+
+  return {
+    nomeEmpresa,
+    docPago,
+    valorRecebido,
+    dataVenc,
+    dataReceb,
+    honorarios: parseValor(honorariosRaw),
+    extras:     parseValor(extrasRaw),
+    nCliente:   nClienteRaw ? String(nClienteRaw).trim() : '',
+    cnpj:       cnpjRaw     ? String(cnpjRaw).trim()    : '',
+    metodo:     metodoRaw   ? String(metodoRaw).trim()  : '',
+    obs:        obsRaw      ? String(obsRaw).trim()     : '',
+    cobrancaExtra: cobrancaExtra ? String(cobrancaExtra).trim() : '',
+    valorNum:   parseValor(valorRecebido),
+    dueDateISO: toBrDate(dataVenc),
+    dataPgto:   dataReceb || dataVenc || new Date().toLocaleDateString('pt-BR'),
+  };
+}
+
+function extractContasPagar(raw) {
+  const movimentacao = (raw.q44_movimentacao44 || '').toString().trim();
+  const docPago      = (raw.q291_docpago       || '').toString().toUpperCase().trim();
+  const valorRef     = raw.q56_valorRefvalor56  || raw.q57_valorPago || '';
+  const dataAPagar   = parseJotformDate(raw.q313_dataA);
+  const dataBaixa    = parseJotformDate(raw.q129_dataBaixa);
+
+  const obsRaw    = findRawField(raw, 'observac', 'obs_');
+  const metodoRaw = findRawField(raw, 'metodopag', 'metodoenv');
+
+  return {
+    movimentacao,
+    docPago,
+    valorRef,
+    dataAPagar,
+    dataBaixa,
+    obs:       obsRaw    ? String(obsRaw).trim()    : '',
+    metodo:    metodoRaw ? String(metodoRaw).trim() : '',
+    valorNum:  parseValor(valorRef),
+    dueDateISO: toBrDate(dataAPagar),
+    dataPgto:  dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR'),
+  };
+}
+
+// ── Monta fields completos para UPDATE no Firestore ───────────────────────────
+
+function buildContasReceberFields(cr, submissionId) {
+  const isPago = cr.docPago === 'SIM';
+  const obj = {
+    source:        'jotform',
+    movement:      'Entrada',
+    type:          'Entrada de Caixa / Contas a Receber',
+    status:        isPago ? 'Pago' : 'Pendente',
+    pago:          isPago ? 'Pago' : 'Não',
+    client:        cr.nomeEmpresa,
+    description:   cr.nomeEmpresa,
+    dueDate:       cr.dueDateISO,
+    date:          cr.dueDateISO,
+    paymentDate:   isPago ? toBrDate(cr.dataPgto) : '',
+    dataPagamento: isPago ? cr.dataPgto : '',
+    valorOriginal: cr.valorNum,
+    valueReceived: isPago ? cr.valorNum : 0,
+    valorPago:     isPago ? String(cr.valorRecebido || '') : '',
+    updatedAt:     new Date().toISOString(),
   };
 
-  if (submissionId) fields.submissionId = { stringValue: String(submissionId) };
+  // Campos extras — só grava se tiver valor
+  if (cr.honorarios > 0)  obj.honorarios  = cr.honorarios;
+  if (cr.extras > 0)      obj.extras      = cr.extras;
+  if (cr.nCliente)        obj.clientNumber = cr.nCliente;
+  if (cr.nCliente)        obj.nCliente     = cr.nCliente;
+  if (cr.cnpj)            obj.cpfCnpj      = cr.cnpj;
+  if (cr.metodo)          obj.metodoPagamento = cr.metodo;
+  if (cr.obs)             obj.observacao   = cr.obs;
+  if (cr.cobrancaExtra)   obj.cobrancaExtra = cr.cobrancaExtra;
+  if (submissionId)       obj.submissionId  = String(submissionId);
 
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/transactions/${docId}`;
-  const resp = await fetch(url, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ fields }),
-  });
-  if (!resp.ok) throw new Error(`Firestore SET falhou (${docId}): ${await resp.text()}`);
-  console.log(`Firestore CRIADO: ${docId} | ${description} | venc: ${dueDateISO}`);
+  return toFields(obj);
 }
 
-// Extrai número do trx a partir do ID único do JotForm (ex: "SP-CX43326" → "trx-43326")
-function extractTrxId(idUnico) {
-  if (!idUnico) return null;
-  const match = idUnico.toString().match(/(\d+)$/);
-  return match ? `trx-${match[1]}` : null;
+function buildContasPagarFields(cp, submissionId) {
+  const isPago = cp.docPago === 'SIM';
+  const obj = {
+    source:        'jotform',
+    movement:      'Saída',
+    type:          'Saída de Caixa / Contas a Pagar',
+    status:        isPago ? 'Pago' : 'Pendente',
+    pago:          isPago ? 'Pago' : 'Não',
+    description:   cp.movimentacao,
+    client:        cp.movimentacao,
+    dueDate:       cp.dueDateISO,
+    date:          cp.dueDateISO,
+    paymentDate:   isPago ? toBrDate(cp.dataPgto) : '',
+    dataPagamento: isPago ? cp.dataPgto : '',
+    valorOriginal: cp.valorNum,
+    valuePaid:     cp.valorNum,
+    valueReceived: 0,
+    valorPago:     isPago ? String(cp.valorRef || '') : '',
+    updatedAt:     new Date().toISOString(),
+  };
+
+  if (cp.obs)    obj.observacao = cp.obs;
+  if (cp.metodo) obj.metodoPagamento = cp.metodo;
+  if (submissionId) obj.submissionId = String(submissionId);
+
+  return toFields(obj);
 }
+
+// ── Main webhook ──────────────────────────────────────────────────────────────
 
 app.post('/', upload.any(), async (req, res) => {
   try {
@@ -229,14 +342,63 @@ app.post('/', upload.any(), async (req, res) => {
       try { raw = JSON.parse(topBody.rawRequest); } catch(e) { raw = {}; }
     }
 
-    const submissionId = raw.submissionID || topBody.submissionID || raw.submission_id || topBody.submission_id || null;
+    // LOG COMPLETO — identifica IDs de campos desconhecidos nos logs do Cloud Run
+    console.log('=== RAW PAYLOAD KEYS ===', Object.keys(raw).join(', '));
+    console.log('=== RAW PAYLOAD ===', JSON.stringify(raw, null, 2));
 
-    // Detecta qual formulário enviou: Contas a Receber usa q314_docpago314, Contas a Pagar usa q291_docpago
-    const isContasReceber = !!raw.q314_docpago314 || !!raw.q169_nomeEmpresa || !!raw.q262_dataVencimentoreceber;
+    const submissionId = raw.submissionID || topBody.submissionID ||
+                         raw.submission_id || topBody.submission_id || null;
+
+    const isContasReceber = !!raw.q314_docpago314 || !!raw.q169_nomeEmpresa ||
+      !!(raw.q262_dataVencimentoreceber && raw.q262_dataVencimentoreceber.day);
+
+    console.log('Formulário:', isContasReceber ? 'Contas a Receber' : 'Contas a Pagar');
+    console.log('submissionId:', submissionId);
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // CAMINHO 1: EDIÇÃO — submissionId já existe no Firestore → UPDATE completo
+    // ══════════════════════════════════════════════════════════════════════════
+    if (submissionId) {
+      const fallbackLookup = isContasReceber
+        ? { clientNumber: (raw.q169_nomeEmpresa || '').toString().trim(), dueDate: (function(){const d=parseJotformDate(raw.q262_dataVencimentoreceber);return d;})(), valorRef: (raw.q252_valorRecebido || raw.q279_totalCobranca279 || '') }
+        : { clientNumber: (raw.q44_movimentacao44 || '').toString().trim(), dueDate: (function(){const d=parseJotformDate(raw.q313_dataA);return d;})(), valorRef: (raw.q56_valorRefvalor56 || raw.q57_valorPago || '') };
+      const existing = await queryBySubmissionId(submissionId, fallbackLookup);
+
+      if (existing) {
+        const docId = existing.document.name.split('/').pop();
+        console.log(`EDIÇÃO DETECTADA — submissionId ${submissionId} → doc ${docId}`);
+
+        let updateFields;
+        if (isContasReceber) {
+          const cr = extractContasReceber(raw);
+          console.log('[CR] Parsed:', cr);
+          updateFields = buildContasReceberFields(cr, submissionId);
+        } else {
+          const cp = extractContasPagar(raw);
+          console.log('[CP] Parsed:', cp);
+          updateFields = buildContasPagarFields(cp, submissionId);
+        }
+
+        await firestorePatch(docId, updateFields);
+        console.log(`UPDATE OK: ${docId} (submissionId: ${submissionId})`);
+        return res.status(200).json({
+          status: 'entry_updated',
+          docId,
+          submissionId,
+          form: isContasReceber ? 'contas_receber' : 'contas_pagar'
+        });
+      }
+      // submissionId presente mas NÃO encontrado no Firestore → segue fluxo normal
+      console.log(`submissionId ${submissionId} não encontrado no Firestore — tratando como novo`);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // CAMINHO 2 e 3: lógica original (baixa ou novo lançamento)
+    // ══════════════════════════════════════════════════════════════════════════
 
     const docPago = isContasReceber
       ? (raw.q314_docpago314 || '').toString().toUpperCase().trim()
-      : (raw.q291_docpago || '').toString().toUpperCase().trim();
+      : (raw.q291_docpago    || '').toString().toUpperCase().trim();
 
     const movimentacao = isContasReceber
       ? (raw.q169_nomeEmpresa || '').toString().trim()
@@ -254,115 +416,137 @@ app.post('/', upload.any(), async (req, res) => {
       ? parseJotformDate(raw.q263_dataRecebimento)
       : parseJotformDate(raw.q129_dataBaixa);
 
-    console.log('Formulário:', isContasReceber ? 'Contas a Receber' : 'Contas a Pagar');
-    console.log('Campos extraídos:', { docPago, movimentacao, valorRef, dataAPagar, dataBaixa, submissionId });
-
     if (!movimentacao) {
       console.error('Movimentacao ausente — DUMP:', JSON.stringify(raw, null, 2));
       return res.status(400).json({ error: 'Movimentacao ausente' });
     }
 
-    const sheets = await getSheetsClient();
-    const allRows = await readFullSheet(sheets);
+    const dataPgto   = dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR');
+    const dueDateISO = toBrDate(dataAPagar);
+    const valorNum   = parseValor(valorRef);
 
-    // CASO 1: Baixa de pagamento (Doc.Pago = SIM)
+    // ── CAMINHO 2: BAIXA (Doc.Pago = SIM) ────────────────────────────────────
     if (docPago === 'SIM') {
-      const dataPgto = dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR');
+      const movement    = isContasReceber ? 'Entrada' : 'Saída';
+      const clientField = isContasReceber ? 'client' : 'description';
 
-      // Contas a Receber: busca no Firestore por nome do cliente + data de vencimento
-      if (isContasReceber) {
-        const dueDateISO = toBrDate(dataAPagar);
-        const token = await getFirestoreToken();
-        const queryUrl = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
-        const queryBody = {
-          structuredQuery: {
-            from: [{ collectionId: 'transactions' }],
-            where: {
-              compositeFilter: {
-                op: 'AND',
-                filters: [
-                  { fieldFilter: { field: { fieldPath: 'client' }, op: 'EQUAL', value: { stringValue: movimentacao } } },
-                  { fieldFilter: { field: { fieldPath: 'dueDate' }, op: 'EQUAL', value: { stringValue: dueDateISO } } },
-                  { fieldFilter: { field: { fieldPath: 'movement' }, op: 'EQUAL', value: { stringValue: 'Entrada' } } },
-                ]
-              }
-            },
-            limit: 10
-          }
-        };
-        const qResp = await fetch(queryUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(queryBody),
-        });
-        const qData = await qResp.json();
-        const matchDocs = qData.filter(d => d.document);
-        if (matchDocs.length === 0) {
-          console.error('Contas a Receber nao encontrada:', movimentacao, dueDateISO);
-          return res.status(404).json({ error: 'Transacao nao encontrada', movimentacao, dueDateISO });
-        }
-        const trxIds = [];
-        for (const d of matchDocs) {
-          const docId = d.document.name.split('/').pop();
-          const sheetRow = parseInt(docId.replace('trx-', ''));
-          const rowIndex = sheetRow + 2; // trx-N = linha N+2 (header na linha 1, dados a partir da linha 2)
-          // Escreve na planilha PRIMEIRO — Apps Script vai ler AJ=SIM e salvar Pago no Firestore
-          await updateSheetsEntrada(rowIndex, 'SIM', valorRef, dataPgto);
-          // Aguarda Apps Script processar (evita race condition)
-          await new Promise(r => setTimeout(r, 4000));
-          // Confirma Pago no Firestore com valueReceived preenchido
-          await updateFirestoreEntrada(sheetRow, 'Pago', valorRef, dataPgto, submissionId);
-          trxIds.push(docId);
-        }
-        console.log('BAIXA RECEBER OK:', movimentacao, '->', trxIds.join(', '));
-        return res.status(200).json({ status: 'payment_receber_updated', movimentacao, trxIds, submissionId });
-      }
-
-      // Contas a Pagar: busca na planilha por movimentação
-      const match = findRowInData(allRows, movimentacao, dataAPagar, false);
-      if (!match) {
-        console.error('Não encontrado para baixa:', movimentacao);
-        return res.status(404).json({ error: 'Movimentacao nao encontrada', movimentacao });
-      }
-      await Promise.all([
-        updateSheets(match.rowIndex, 'Pago', valorRef, dataPgto),
-        updateFirestore(match.sheetRow, 'Pago', valorRef, dataPgto, submissionId),
+      const matchDocs = await queryFirestore([
+        [clientField, movimentacao],
+        ['dueDate',   dueDateISO],
+        ['movement',  movement],
       ]);
-      console.log('BAIXA OK:', movimentacao, '→ linha', match.rowIndex);
-      return res.status(200).json({ status: 'payment_updated', movimentacao, rowIndex: match.rowIndex, submissionId });
+
+      if (matchDocs.length === 0) {
+        console.error('Transação não encontrada:', movimentacao, dueDateISO, movement);
+        return res.status(404).json({ error: 'Transacao nao encontrada', movimentacao, dueDateISO });
+      }
+
+      const trxIds = [];
+      for (const d of matchDocs) {
+        const docId = d.document.name.split('/').pop();
+
+        const patchFields = isContasReceber
+          ? {
+              pago:          { stringValue: 'Pago' },
+              status:        { stringValue: 'Pago' },
+              valueReceived: { doubleValue: valorNum },
+              valorPago:     { stringValue: String(valorRef || '') },
+              dataPagamento: { stringValue: dataPgto },
+              paymentDate:   { stringValue: toBrDate(dataPgto) },
+              updatedAt:     { stringValue: new Date().toISOString() },
+            }
+          : {
+              pago:          { stringValue: 'Pago' },
+              status:        { stringValue: 'Pago' },
+              valorPago:     { stringValue: String(valorRef || '') },
+              dataPagamento: { stringValue: dataPgto },
+              paymentDate:   { stringValue: toBrDate(dataPgto) },
+              updatedAt:     { stringValue: new Date().toISOString() },
+            };
+
+        if (submissionId) patchFields.submissionId = { stringValue: String(submissionId) };
+
+        await firestorePatch(docId, patchFields);
+        trxIds.push(docId);
+      }
+
+      console.log('BAIXA OK:', movimentacao, '->', trxIds.join(', '));
+      return res.status(200).json({ status: 'payment_updated', movimentacao, trxIds, submissionId });
     }
 
-    // CASO 2: Novo lançamento (Doc.Pago = NÃO / vazio)
-    // Contas a Receber: o Apps Script onSheetChange já sincroniza automaticamente — não criar aqui
+    // ── CAMINHO 3: NOVO LANÇAMENTO ────────────────────────────────────────────
+    const docId   = generateDocId();
+    const dateISO = dueDateISO || new Date().toISOString().split('T')[0];
+
+    let docData;
     if (isContasReceber) {
-      console.log('Contas a Receber novo lançamento — delegado ao Apps Script:', movimentacao);
-      return res.status(200).json({ status: 'delegated_to_apps_script', movimentacao });
+      const cr = extractContasReceber(raw);
+      docData = {
+        id:            docId,
+        source:        'jotform',
+        movement:      'Entrada',
+        type:          'Entrada de Caixa / Contas a Receber',
+        status:        'Pendente',
+        pago:          'Não',
+        client:        movimentacao,
+        description:   movimentacao,
+        date:          dateISO,
+        dueDate:       dueDateISO || dateISO,
+        paymentDate:   '',
+        dataPagamento: '',
+        valorOriginal: valorNum,
+        valuePaid:     0,
+        valueReceived: 0,
+        valorPago:     '',
+        bankAccount:   '',
+        updatedAt:     new Date().toISOString(),
+      };
+      // Campos extras capturados
+      if (cr.honorarios > 0) docData.honorarios   = cr.honorarios;
+      if (cr.extras > 0)     docData.extras        = cr.extras;
+      if (cr.nCliente)       docData.clientNumber  = cr.nCliente;
+      if (cr.nCliente)       docData.nCliente      = cr.nCliente;
+      if (cr.cnpj)           docData.cpfCnpj       = cr.cnpj;
+      if (cr.metodo)         docData.metodoPagamento = cr.metodo;
+      if (cr.obs)            docData.observacao    = cr.obs;
+      if (cr.cobrancaExtra)  docData.cobrancaExtra = cr.cobrancaExtra;
+    } else {
+      docData = {
+        id:            docId,
+        source:        'jotform',
+        movement:      'Saída',
+        type:          'Saída de Caixa / Contas a Pagar',
+        status:        'Pendente',
+        pago:          'Não',
+        description:   movimentacao,
+        client:        movimentacao,
+        date:          dateISO,
+        dueDate:       dueDateISO || dateISO,
+        paymentDate:   '',
+        dataPagamento: '',
+        valorOriginal: valorNum,
+        valuePaid:     valorNum,
+        valueReceived: 0,
+        valorPago:     '',
+        bankAccount:   '',
+        updatedAt:     new Date().toISOString(),
+      };
     }
 
-    // Busca de baixo pra cima — JotForm acabou de inserir a linha (Contas a Pagar)
-    const match = findRowInData(allRows, movimentacao, dataAPagar, true);
-    if (!match) {
-      console.warn('Linha não encontrada ainda, criando com dados mínimos do JotForm:', movimentacao);
-      const syntheticSheetRow = allRows.length;
-      await createFirestoreDocument(
-        syntheticSheetRow,
-        ['', '', dataAPagar || '', '', '', movimentacao, '', '', 'Saída', valorRef || '0'],
-        movimentacao, valorRef, dataAPagar, submissionId
-      );
-      return res.status(200).json({ status: 'entry_created_minimal', movimentacao, sheetRow: syntheticSheetRow });
-    }
+    if (submissionId) docData.submissionId = String(submissionId);
 
-    await createFirestoreDocument(match.sheetRow, match.rowData, movimentacao, valorRef, dataAPagar, submissionId);
-    console.log(`LANÇAMENTO OK: ${movimentacao} → linha ${match.rowIndex} | trx-${match.sheetRow}`);
-    return res.status(200).json({ status: 'entry_created', movimentacao, rowIndex: match.rowIndex, sheetRow: match.sheetRow, submissionId });
+    await firestoreSet(docId, toFields(docData));
+
+    console.log(`LANÇAMENTO OK (${isContasReceber ? 'RECEBER' : 'PAGAR'}): ${movimentacao} → ${docId}`);
+    return res.status(200).json({ status: 'entry_created', movimentacao, docId, submissionId });
 
   } catch (err) {
-    console.error('Erro:', err.message);
+    console.error('Erro geral:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '3.0' }));
+app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '5.1-fallback-lookup' }));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Webhook rodando na porta ${PORT}`));
