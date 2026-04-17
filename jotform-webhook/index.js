@@ -258,8 +258,8 @@ function toFields(obj) {
 // v5.3: gera trx-N sequencial via counter atomico em meta/lastTrxN
 async function generateDocId() {
   const token = await getFirestoreToken();
-  const counterUrl = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_SYNC_CONFIG.FIREBASE_PROJECT_ID + '/databases/(default)/documents:commit';
-  const docPath = 'projects/' + FIREBASE_SYNC_CONFIG.FIREBASE_PROJECT_ID + '/databases/(default)/documents/meta/lastTrxN';
+  const counterUrl = 'https://firestore.googleapis.com/v1/projects/' + PROJECT_ID + '/databases/(default)/documents:commit';
+  const docPath = 'projects/' + PROJECT_ID + '/databases/(default)/documents/meta/lastTrxN';
   const body = {
     writes: [{
       transform: {
@@ -555,9 +555,10 @@ app.post('/', upload.any(), async (req, res) => {
       ]);
 
       if (matchDocs.length === 0) {
-        console.error('Transação não encontrada:', movimentacao, dueDateISO, movement);
-        return res.status(404).json({ error: 'Transacao nao encontrada', movimentacao, dueDateISO });
-      }
+        // v5.9: ao inves de 404, cai para CAMINHO 3 e cria doc novo ja como Pago.
+        // Isso preserva lancamentos "compra e pagamento no mesmo dia" sem Pendente previo.
+        console.warn(`CAMINHO 2: nenhum Pendente para baixar (${movimentacao} ${dueDateISO} ${movement}) — criando doc novo como Pago via CAMINHO 3`);
+      } else {
 
       const trxIds = [];
       for (const d of matchDocs) {
@@ -590,6 +591,7 @@ app.post('/', upload.any(), async (req, res) => {
 
       console.log('BAIXA OK:', movimentacao, '->', trxIds.join(', '));
       return res.status(200).json({ status: 'payment_updated', movimentacao, trxIds, submissionId });
+      } // fecha else do v5.9 (matchDocs.length > 0)
     }
 
     // ── CAMINHO 3: NOVO LANÇAMENTO ────────────────────────────────────────────
@@ -629,26 +631,31 @@ app.post('/', upload.any(), async (req, res) => {
       if (cr.obs)            docData.observacao    = cr.obs;
       if (cr.cobrancaExtra)  docData.cobrancaExtra = cr.cobrancaExtra;
     } else {
+      // v5.9: respeita docPago para casos "compra e pagamento no mesmo dia"
+      const cp = extractContasPagar(raw);
+      const isPagoCP = docPago === 'SIM';
       docData = {
         id:            docId,
         source:        'jotform',
         movement:      'Saída',
         type:          'Saída de Caixa / Contas a Pagar',
-        status:        'Pendente',
-        pago:          'Não',
+        status:        isPagoCP ? 'Pago' : 'Pendente',
+        pago:          isPagoCP ? 'Pago' : 'Não',
         description:   movimentacao,
         client:        movimentacao,
         date:          dateISO,
         dueDate:       dueDateISO || dateISO,
-        paymentDate:   '',
-        dataPagamento: '',
+        paymentDate:   isPagoCP ? toBrDate(dataPgto) : '',
+        dataPagamento: isPagoCP ? dataPgto : '',
         valorOriginal: valorNum,
         valuePaid:     valorNum,
         valueReceived: 0,
-        valorPago:     '',
+        valorPago:     isPagoCP ? String(valorRef || '') : '',
         bankAccount:   '',
         updatedAt:     new Date().toISOString(),
       };
+      if (cp.obs)    docData.observacaoAPagar = cp.obs;
+      if (cp.metodo) docData.metodoPagamento  = cp.metodo;
     }
 
     if (submissionId) docData.submissionId = String(submissionId);
@@ -664,7 +671,7 @@ app.post('/', upload.any(), async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '5.8-cp-obs-fix' }));
+app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '5.10-fix-generateDocId' }));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Webhook rodando na porta ${PORT}`));
