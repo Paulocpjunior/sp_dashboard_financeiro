@@ -114,12 +114,28 @@ async function queryFirestore(filters) {
   return data.filter(d => d.document);
 }
 
+async function firestoreDelete(docId) {
+  const token = await getFirestoreToken();
+  const url = `${FIRESTORE_BASE}/${docId}`;
+  const resp = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok && resp.status !== 404) {
+    const txt = await resp.text();
+    throw new Error(`Delete falhou (${resp.status}): ${txt}`);
+  }
+  console.log(`Firestore DELETE: ${docId}`);
+  return true;
+}
+
 // ── NOVO: busca por submissionId ──────────────────────────────────────────────
 
 async function queryBySubmissionId(submissionId, fallback) {
   const token = await getFirestoreToken();
   const url = `${FIRESTORE_BASE}:runQuery`;
-  // Tenta ambos os nomes de campo: submissionId (novo) e submissionID (legado)
+
+  // 1) Match direto por submissionId / submissionID
   for (const fieldName of ['submissionId', 'submissionID']) {
     const body = {
       structuredQuery: {
@@ -128,34 +144,6 @@ async function queryBySubmissionId(submissionId, fallback) {
           field: { fieldPath: fieldName },
           op: 'EQUAL',
           value: { stringValue: String(submissionId) }
-        }},
-        limit: 1
-      }
-    };
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
-    const data = await resp.json();
-    const found = (data || []).filter(d => d.document);
-    if (found.length > 0) {
-      console.log(`Match por ${fieldName}=${submissionId}`);
-      return found[0];
-    }
-  }
-  // Fallback: docs legados sem submissionId — match por (clientNumber, dueDate, valorRef)
-  if (fallback && fallback.clientNumber && fallback.dueDate) {
-    console.log(`Fallback lookup: cli=${fallback.clientNumber} venc=${fallback.dueDate} valor=${fallback.valorRef}`);
-    const body = {
-      structuredQuery: {
-        from: [{ collectionId: 'transactions' }],
-        where: { compositeFilter: {
-          op: 'AND',
-          filters: [
-            { fieldFilter: { field: { fieldPath: 'dueDate' }, op: 'EQUAL', value: { stringValue: String(fallback.dueDate) } } },
-            { fieldFilter: { field: { fieldPath: 'clientNumber' }, op: 'EQUAL', value: { stringValue: String(fallback.clientNumber) } } }
-          ]
         }},
         limit: 10
       }
@@ -166,24 +154,93 @@ async function queryBySubmissionId(submissionId, fallback) {
       body: JSON.stringify(body),
     });
     const data = await resp.json();
-    let found = (data || []).filter(d => d.document);
-    // Tenta tambem clientNumber como integerValue
-    if (found.length === 0) {
-      const body2 = JSON.parse(JSON.stringify(body));
-      body2.structuredQuery.where.compositeFilter.filters[1].fieldFilter.value = { integerValue: String(fallback.clientNumber) };
-      const resp2 = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body2),
-      });
-      const data2 = await resp2.json();
-      found = (data2 || []).filter(d => d.document);
-    }
+    const found = (data || []).filter(d => d.document);
     if (found.length > 0) {
-      console.log(`Fallback match: ${found[0].document.name.split('/').pop()}`);
-      return found[0];
+      console.log(`Match por ${fieldName}=${submissionId} → ${found.length} doc(s)`);
+      return found;
     }
   }
+
+  // 2) Fallback Receber v5.6: (clientNumber + cpfCnpj + dueDate)
+  // Exige os 3 campos para impressao digital unica.
+  // Bloqueia match por nome (matriz/filial com nome igual causavam corrupcao).
+  if (fallback && fallback.kind === 'receber' && fallback.clientNumber && fallback.cpfCnpj && fallback.dueDate) {
+    console.log(`Fallback Receber v5.6: cli=${fallback.clientNumber} cnpj=${fallback.cpfCnpj} venc=${fallback.dueDate}`);
+    const buildBody = (cnVal) => ({
+      structuredQuery: {
+        from: [{ collectionId: 'transactions' }],
+        where: { compositeFilter: {
+          op: 'AND',
+          filters: [
+            { fieldFilter: { field: { fieldPath: 'clientNumber' }, op: 'EQUAL', value: cnVal } },
+            { fieldFilter: { field: { fieldPath: 'cpfCnpj' }, op: 'EQUAL', value: { stringValue: String(fallback.cpfCnpj) } } },
+            { fieldFilter: { field: { fieldPath: 'dueDate' }, op: 'EQUAL', value: { stringValue: String(fallback.dueDate) } } }
+          ]
+        }},
+        limit: 10
+      }
+    });
+    for (const cnVal of [{ integerValue: String(fallback.clientNumber) }, { stringValue: String(fallback.clientNumber) }]) {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(buildBody(cnVal)),
+      });
+      const data = await resp.json();
+      const found = (data || []).filter(d => d.document);
+      if (found.length > 0) { console.log(`Fallback Receber v5.6 match → ${found.length} doc(s)`); return found; }
+    }
+    console.log(`Fallback Receber v5.6: sem match - criara novo doc`);
+  } else if (fallback && fallback.kind === 'receber') {
+    console.log(`Fallback Receber v5.6 NAO APLICADO - faltam campos: cli=${!!fallback.clientNumber} cnpj=${!!fallback.cpfCnpj} venc=${!!fallback.dueDate}`);
+  }
+
+  // 3) Fallback Pagar: (description + dueDate + valuePaid)
+  if (fallback && fallback.kind === 'pagar' && fallback.description && fallback.dueDate && fallback.valuePaid != null) {
+    console.log(`Fallback Pagar: desc='${fallback.description}' venc=${fallback.dueDate} valor=${fallback.valuePaid}`);
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: 'transactions' }],
+        where: { compositeFilter: {
+          op: 'AND',
+          filters: [
+            { fieldFilter: { field: { fieldPath: 'description' }, op: 'EQUAL', value: { stringValue: String(fallback.description) } } },
+            { fieldFilter: { field: { fieldPath: 'dueDate' }, op: 'EQUAL', value: { stringValue: String(fallback.dueDate) } } }
+          ]
+        }},
+        limit: 50
+      }
+    };
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    const all = (data || []).filter(d => d.document);
+    // Filtragem client-side por valuePaid (evita índice composto)
+    const target = Number(fallback.valuePaid);
+    const matches = all.filter(d => {
+      const fields = d.document.fields || {};
+      // v5.7: NUNCA sobrescrever docs ja Pagos — so atualiza Pendentes
+      const st = fields.status && fields.status.stringValue;
+      if (st !== 'Pendente') return false;
+      // v5.7: rejeitar docs com _dedupe=true (orfaos ja tratados)
+      const ded = fields._dedupe && fields._dedupe.booleanValue;
+      if (ded === true) return false;
+      const vp = fields.valuePaid;
+      if (!vp) return false;
+      const v = vp.doubleValue != null ? Number(vp.doubleValue)
+              : vp.integerValue != null ? Number(vp.integerValue)
+              : vp.stringValue != null ? Number(String(vp.stringValue).replace(',', '.'))
+              : NaN;
+      return Number.isFinite(v) && Math.abs(v - target) < 0.005;
+    });
+    // v5.7: match unico = seguro. Ambiguo (2+) = criar novo doc (seguro).
+    if (matches.length === 1) { console.log(`Fallback Pagar match UNICO → doc ${matches[0].document.name.split('/').pop()}`); return matches; }
+    if (matches.length > 1) { console.log(`Fallback Pagar AMBIGUO: ${matches.length} matches — criara novo doc`); return null; }
+  }
+
   return null;
 }
 
@@ -198,8 +255,39 @@ function toFields(obj) {
   return fields;
 }
 
-function generateDocId() {
-  return `trx-jf-${Date.now()}`;
+// v5.3: gera trx-N sequencial via counter atomico em meta/lastTrxN
+async function generateDocId() {
+  const token = await getFirestoreToken();
+  const counterUrl = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_SYNC_CONFIG.FIREBASE_PROJECT_ID + '/databases/(default)/documents:commit';
+  const docPath = 'projects/' + FIREBASE_SYNC_CONFIG.FIREBASE_PROJECT_ID + '/databases/(default)/documents/meta/lastTrxN';
+  const body = {
+    writes: [{
+      transform: {
+        document: docPath,
+        fieldTransforms: [{ fieldPath: 'value', increment: { integerValue: '1' } }]
+      }
+    }]
+  };
+  try {
+    const resp = await fetch(counterUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.writeResults && data.writeResults[0] && data.writeResults[0].transformResults) {
+      const newVal = data.writeResults[0].transformResults[0].integerValue;
+      const id = 'trx-' + newVal;
+      console.log('generateDocId: ' + id);
+      return id;
+    }
+    console.log('generateDocId: counter response unexpected, fallback. resp=' + JSON.stringify(data).slice(0,200));
+  } catch (e) {
+    console.log('generateDocId: counter ERR ' + e.message + ', fallback');
+  }
+  const fallback = 'trx-jf-' + Date.now();
+  console.log('generateDocId FALLBACK: ' + fallback);
+  return fallback;
 }
 
 // ── Extrai todos os campos relevantes do raw JotForm ─────────────────────────
@@ -325,7 +413,7 @@ function buildContasPagarFields(cp, submissionId) {
     updatedAt:     new Date().toISOString(),
   };
 
-  if (cp.obs)    obj.observacao = cp.obs;
+  if (cp.obs)    obj.observacaoAPagar = cp.obs;
   if (cp.metodo) obj.metodoPagamento = cp.metodo;
   if (submissionId) obj.submissionId = String(submissionId);
 
@@ -359,13 +447,43 @@ app.post('/', upload.any(), async (req, res) => {
     // CAMINHO 1: EDIÇÃO — submissionId já existe no Firestore → UPDATE completo
     // ══════════════════════════════════════════════════════════════════════════
     if (submissionId) {
-      const fallbackLookup = isContasReceber
-        ? { clientNumber: (raw.q169_nomeEmpresa || '').toString().trim(), dueDate: (function(){const d=parseJotformDate(raw.q262_dataVencimentoreceber);return d;})(), valorRef: (raw.q252_valorRecebido || raw.q279_totalCobranca279 || '') }
-        : { clientNumber: (raw.q44_movimentacao44 || '').toString().trim(), dueDate: (function(){const d=parseJotformDate(raw.q313_dataA);return d;})(), valorRef: (raw.q56_valorRefvalor56 || raw.q57_valorPago || '') };
-      const existing = await queryBySubmissionId(submissionId, fallbackLookup);
+      // v5.2: fallback DESABILITADO para Contas a Pagar (causou sobrescrita de docs alheios
+      // porque clientNumber em Pagar = categoria de movimentação, não cliente único).
+      // Receber mantém fallback porque q169_nomeEmpresa tem cardinalidade alta.
+      let fallbackLookup;
+      // v5.6c EMERGENCIAL: fallback Receber DESABILITADO - bug no fluxo "criar novo" sobrescreve doc existente
+      // Qualquer edicao sem submissionId vira novo doc (duplicata visivel, removivel depois)
+      if (false && isContasReceber) {
+        fallbackLookup = null;
+      }
+      // v5.7: fallback Pagar REABILITADO com protecao status=Pendente
+      // So atualiza docs Pendentes (nunca sobrescreve Pagos).
+      // Se match ambiguo (0 ou 2+), cria novo doc (comportamento seguro).
+      if (!isContasReceber) {
+        const cp = extractContasPagar(raw);
+        fallbackLookup = {
+          kind: 'pagar',
+          description: cp.movimentacao,
+          dueDate: cp.dueDateISO,
+          valuePaid: cp.valorNum,
+        };
+      }
+      const existingArr = await queryBySubmissionId(submissionId, fallbackLookup);
 
-      if (existing) {
-        const docId = existing.document.name.split('/').pop();
+      if (existingArr && existingArr.length > 0) {
+        // Ordenar por createTime ascendente — o mais antigo é o canônico
+        existingArr.sort((a, b) => (a.document.createTime || '').localeCompare(b.document.createTime || ''));
+        const primary = existingArr[0];
+        const duplicates = existingArr.slice(1);
+        const docId = primary.document.name.split('/').pop();
+        if (duplicates.length > 0) {
+          console.log(`DUPLICATAS detectadas (${duplicates.length}) para submissionId ${submissionId} — mantendo ${docId}, deletando: ${duplicates.map(d=>d.document.name.split('/').pop()).join(', ')}`);
+          for (const dup of duplicates) {
+            const dupId = dup.document.name.split('/').pop();
+            try { await firestoreDelete(dupId); }
+            catch (e) { console.error(`Falha ao deletar duplicata ${dupId}:`, e.message); }
+          }
+        }
         console.log(`EDIÇÃO DETECTADA — submissionId ${submissionId} → doc ${docId}`);
 
         let updateFields;
@@ -475,7 +593,7 @@ app.post('/', upload.any(), async (req, res) => {
     }
 
     // ── CAMINHO 3: NOVO LANÇAMENTO ────────────────────────────────────────────
-    const docId   = generateDocId();
+    const docId   = await generateDocId();
     const dateISO = dueDateISO || new Date().toISOString().split('T')[0];
 
     let docData;
@@ -546,7 +664,7 @@ app.post('/', upload.any(), async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '5.1-fallback-lookup' }));
+app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '5.8-cp-obs-fix' }));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Webhook rodando na porta ${PORT}`));
