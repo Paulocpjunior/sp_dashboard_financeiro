@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthService } from '../services/authService';
+import { BackendService } from '../services/backendService';
 import { User, Lock, Eye, EyeOff, ShieldCheck, Loader2, AlertCircle, ArrowLeft, Mail, CheckCircle2, UserPlus, Phone, BadgeCheck } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle';
 
@@ -8,7 +9,7 @@ const Login: React.FC = () => {
   const [view, setView] = useState<'login' | 'forgot' | 'register'>('login');
   
   // Login State
-  const [loginEmail, setLoginEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -17,7 +18,7 @@ const Login: React.FC = () => {
   const [welcomeName, setWelcomeName] = useState('');
   
   // Forgot Password State
-  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotUsername, setForgotUsername] = useState('');
   const [forgotStatus, setForgotStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [forgotMessage, setForgotMessage] = useState('');
 
@@ -43,7 +44,7 @@ const Login: React.FC = () => {
     setIsLoading(true);
     
     try {
-      const result = await AuthService.login(loginEmail, password);
+      const result = await AuthService.login(username, password);
       
       if (result.success) {
         if (result.user) {
@@ -75,7 +76,7 @@ const Login: React.FC = () => {
     setForgotMessage('');
 
     try {
-      const result = await AuthService.requestPasswordReset(forgotEmail);
+      const result = await BackendService.requestPasswordReset(forgotUsername);
       if (result.success) {
         setForgotStatus('success');
         setForgotMessage(result.message);
@@ -118,7 +119,7 @@ const Login: React.FC = () => {
 
     try {
       // Chama o backend para registrar o usuário
-      const result = await AuthService.register({
+      const result = await BackendService.registerUser({
         name: registerData.name,
         email: registerData.email,
         phone: registerData.phone,
@@ -128,7 +129,7 @@ const Login: React.FC = () => {
 
       if (result.success) {
         setRegisterStatus('success');
-        setRegisterMessage(result.message || 'Cadastro realizado! Verifique seu email para confirmar a conta e aguarde a aprovação do administrador.');
+        setRegisterMessage(result.message || 'Cadastro realizado com sucesso! Aguarde a aprovação do administrador.');
       } else {
         setRegisterStatus('error');
         setRegisterMessage(result.message || 'Erro ao realizar cadastro.');
@@ -206,15 +207,15 @@ const Login: React.FC = () => {
             {/* Form */}
             <form onSubmit={handleLoginSubmit}>
               <div className="mb-5">
-                <label className="block text-[13px] font-semibold text-slate-700 dark:text-slate-300 mb-2">Email</label>
+                <label className="block text-[13px] font-semibold text-slate-700 dark:text-slate-300 mb-2">Usuário</label>
                 <div className="relative group">
                   <div className="absolute left-[15px] top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-royal-600 transition-colors">
                     <User className="h-4 w-4" />
                   </div>
                   <input
                     type="text"
-                    value={loginEmail}
-                    onChange={(e) => handleInput(setLoginEmail, e.target.value)}
+                    value={username}
+                    onChange={(e) => handleInput(setUsername, e.target.value)}
                     className="w-full py-3.5 pl-[45px] pr-3.5 border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-[10px] text-[15px] text-slate-800 dark:text-white transition-all focus:outline-none focus:border-royal-600 focus:ring-4 focus:ring-royal-600/10 placeholder:text-slate-400"
                     placeholder="Digite seu usuário"
                     required
@@ -326,7 +327,7 @@ const Login: React.FC = () => {
                 </div>
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white">Recuperar Senha</h2>
                 <p className="text-slate-500 dark:text-slate-400 text-sm mt-2">
-                  Informe seu email cadastrado para receber o link de redefinição de senha.
+                  Informe seu usuário para resetar sua senha.
                 </p>
              </div>
 
@@ -347,7 +348,7 @@ const Login: React.FC = () => {
              ) : (
                <form onSubmit={handleForgotSubmit}>
                  <div className="mb-6">
-                    <label className="block text-[13px] font-semibold text-slate-700 dark:text-slate-300 mb-2">Email Cadastrado</label>
+                    <label className="block text-[13px] font-semibold text-slate-700 dark:text-slate-300 mb-2">Usuário Cadastrado</label>
                     <div className="relative group">
                       <div className="absolute left-[15px] top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-royal-600 transition-colors">
                         <User className="h-4 w-4" />
@@ -355,7 +356,7 @@ const Login: React.FC = () => {
                       <input
                         type="text"
                         value={forgotUsername}
-                        onChange={(e) => setForgotEmail(e.target.value)}
+                        onChange={(e) => setForgotUsername(e.target.value)}
                         className="w-full py-3.5 pl-[45px] pr-3.5 border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-[10px] text-[15px] text-slate-800 dark:text-white transition-all focus:outline-none focus:border-royal-600 focus:ring-4 focus:ring-royal-600/10 placeholder:text-slate-400"
                         placeholder="Ex: admin"
                         required

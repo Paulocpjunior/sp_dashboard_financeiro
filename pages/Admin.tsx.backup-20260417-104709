@@ -3,9 +3,9 @@ import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { User, Shield, CheckCircle, XCircle, Loader2, Database, Save, RotateCcw, AlertTriangle, UserPlus, Clock, Mail, Phone, X, Eye, EyeOff, RefreshCw, Key, Lock, Unlock, FileEdit, Search, PlusCircle, Trash2 } from 'lucide-react';
 import { BackendService } from '../services/backendService';
-import { AuthService } from '../services/authService';
 import { DataService } from '../services/dataService';
 import { User as UserType, Transaction } from '../types';
+import { MOCK_USERS, APPS_SCRIPT_URL } from '../constants';
 import { collection, getDocs, writeBatch, doc, setDoc, updateDoc, deleteDoc, addDoc } from 'firebase/firestore';
 import { db } from '../services/firebaseConfig';
 
@@ -249,21 +249,22 @@ const Admin: React.FC = () => {
 
   const loadPendingUsers = async () => {
     setLoadingPending(true);
+    
+    // Se estiver em modo Mock, não tenta conectar
+    if (DataService.isMockMode) {
+        setPendingUsers([]); // Em modo mock, sem pendentes (ou poderia mockar)
+        setLoadingPending(false);
+        return;
+    }
+
     try {
-      const pending = await BackendService.fetchPendingUsers();
-      // Converte User -> PendingUser (shape usado pela UI)
-      const mapped: PendingUser[] = pending.map((u, idx) => ({
-        id: u.id,
-        rowIndex: idx,
-        timestamp: new Date().toISOString(),
-        name: u.name || '',
-        email: u.email || '',
-        phone: '',
-        username: u.username || '',
-        status: 'Pendente',
-        role: u.role || 'operacional',
-      }));
-      setPendingUsers(mapped);
+      const response = await fetch(APPS_SCRIPT_URL + '?action=pendentes');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.usuarios) {
+          setPendingUsers(data.usuarios);
+        }
+      }
     } catch (error) {
       console.error('Erro ao carregar pendentes:', error);
     } finally {
@@ -271,16 +272,50 @@ const Admin: React.FC = () => {
     }
   };
 
-  // Carregar todos os usuarios do Firestore via BackendService
+  // Carregar todos os usuários do Firestore
   const loadAllUsers = async () => {
+    // Se estiver em modo Mock, usa MOCK_USERS diretamente
+    if (DataService.isMockMode) {
+        setUsers(MOCK_USERS);
+        return;
+    }
+
     try {
-      const firestoreUsers = await BackendService.fetchUsers();
-      // Lista apenas usuarios aprovados (active !== false) aqui;
-      // os pendentes aparecem em loadPendingUsers
-      setUsers(firestoreUsers.filter(u => u.active !== false));
+      // ★ Busca direto do Firestore (fonte de verdade)
+      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(usersRef);
+      const firestoreUsers: UserType[] = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          username: (data.username || data.name || '').toLowerCase().trim(),
+          name: data.name || data.username || '',
+          role: (data.role || 'operacional').toLowerCase().trim() as any,
+          active: data.active !== false,
+          email: data.email || '',
+          passwordHash: data.passwordHash || data.password_hash || '',
+          lastAccess: data.lastAccess || '',
+        };
+      });
+      setUsers(firestoreUsers);
     } catch (error) {
-      console.error('Erro ao carregar usuarios:', error);
-      setUsers([]);
+      console.warn('Falha ao carregar usuários do Firestore. Tentando fallback...', error);
+      try {
+        // Fallback: tenta Apps Script
+        const response = await fetch(APPS_SCRIPT_URL + '?action=usuarios');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.usuarios) {
+            const allUsers = data.usuarios.filter((u: any) => u.status === 'Aprovado' || u.active !== undefined);
+            setUsers(allUsers);
+            return;
+          }
+        }
+        throw new Error("Apps Script fallback também falhou");
+      } catch (fallbackError) {
+        console.warn('Fallback para MOCK_USERS', fallbackError);
+        setUsers(MOCK_USERS);
+      }
     }
   };
 
@@ -316,7 +351,7 @@ const Admin: React.FC = () => {
     setDbMessage(null);
     
     try {
-        BackendService.setSpreadsheetId(spreadsheetId);
+        BackendService.updateSpreadsheetId(spreadsheetId);
         setSpreadsheetId(BackendService.getSpreadsheetId());
         // Se estiver em modo mock, isso não vai funcionar, mas ok.
         await DataService.refreshCache();
@@ -330,7 +365,7 @@ const Admin: React.FC = () => {
 
   const handleRestoreDefault = () => {
       if (confirm('Tem certeza? Isso irá restaurar o ID original da planilha de demonstração.')) {
-          BackendService.setSpreadsheetId('17mHd8eqKoj7Cl6E2MCkr0PczFj-lKv_vmFRCY5hypwg');
+          BackendService.resetSpreadsheetId();
           setSpreadsheetId(BackendService.getSpreadsheetId());
           setDbMessage({ type: 'success', text: 'Configuração restaurada para o padrão.' });
           DataService.refreshCache().catch(() => {});
@@ -533,55 +568,57 @@ const Admin: React.FC = () => {
   const handleCreateUser = async () => {
     setCreateUserMessage(null);
 
-    // Validacoes
+    // Validações
     if (!newUserForm.name || !newUserForm.username || !newUserForm.password) {
       setCreateUserMessage({ type: 'error', text: 'Preencha Nome, Username e Senha.' });
       return;
     }
-    if (!newUserForm.email) {
-      setCreateUserMessage({ type: 'error', text: 'Email e obrigatorio para permitir login.' });
-      return;
-    }
-    if (newUserForm.password !== newUserForm.confirmPassword) {
-      setCreateUserMessage({ type: 'error', text: 'As senhas nao coincidem.' });
-      return;
-    }
-    if (newUserForm.password.length < 6) {
-      setCreateUserMessage({ type: 'error', text: 'A senha deve ter no minimo 6 caracteres.' });
-      return;
-    }
-    setIsCreatingUser(true);
-    try {
-      // Cria conta no Firebase Auth + doc no Firestore via AuthService
-      const result = await AuthService.register({
-        name: newUserForm.name,
-        email: newUserForm.email,
-        phone: newUserForm.phone || '',
-        username: newUserForm.username.toLowerCase().replace(/\s/g, ''),
-        password: newUserForm.password,
-      });
 
-      if (!result.success) {
-        setCreateUserMessage({ type: 'error', text: result.message });
+    if (newUserForm.password !== newUserForm.confirmPassword) {
+      setCreateUserMessage({ type: 'error', text: 'As senhas não coincidem.' });
+      return;
+    }
+
+    if (newUserForm.password.length < 6) {
+      setCreateUserMessage({ type: 'error', text: 'A senha deve ter no mínimo 6 caracteres.' });
+      return;
+    }
+
+    setIsCreatingUser(true);
+
+    try {
+      const username = newUserForm.username.toLowerCase().replace(/\s/g, '');
+      
+      // Verificar se username já existe no Firestore
+      const usersRef = collection(db, 'users');
+      const snapshot = await getDocs(usersRef);
+      const existing = snapshot.docs.find(d => {
+        const data = d.data();
+        return (data.username || '').toLowerCase().trim() === username;
+      });
+      if (existing) {
+        setCreateUserMessage({ type: 'error', text: 'Username já existe. Escolha outro.' });
         setIsCreatingUser(false);
         return;
       }
 
-      // Se admin criou direto, ja aprova o usuario (active: true + role escolhida)
-      // Precisa buscar o doc recem-criado pelo username para obter o uid
-      const usersAfter = await BackendService.fetchUsers();
-      const created = usersAfter.find(u => u.username === newUserForm.username.toLowerCase().replace(/\s/g, ''));
-      if (created) {
-        await BackendService.setUserActive(created.id, true);
-        if (newUserForm.role && newUserForm.role !== 'operacional') {
-          await BackendService.setUserRole(created.id, newUserForm.role as any);
-        }
-      }
+      // ★ Criar direto no Firestore
+      const passwordHash = await sha256(newUserForm.password);
+      const newUserDoc = {
+        name: newUserForm.name,
+        email: newUserForm.email || '',
+        phone: newUserForm.phone || '',
+        username: username,
+        passwordHash: passwordHash,
+        role: newUserForm.role || 'operacional',
+        active: true,
+        createdAt: new Date().toISOString(),
+      };
 
-      setCreateUserMessage({
-        type: 'success',
-        text: `Usuario "${newUserForm.name}" criado e ativado. Email de verificacao enviado para ${newUserForm.email}.`
-      });
+      const newDocRef = doc(collection(db, 'users'));
+      await setDoc(newDocRef, newUserDoc);
+
+      setCreateUserMessage({ type: 'success', text: `Usuário "${newUserForm.name}" criado com sucesso!` });
       setTimeout(() => {
         setShowNewUserModal(false);
         setNewUserForm({
@@ -594,49 +631,107 @@ const Admin: React.FC = () => {
           role: 'operacional'
         });
         setCreateUserMessage(null);
-        loadAllUsers();
-      }, 2500);
+        loadAllUsers(); // Recarrega lista
+      }, 1500);
     } catch (error: any) {
-      console.error('Erro ao criar usuario:', error);
-      setCreateUserMessage({ type: 'error', text: error?.message || 'Erro ao criar usuario. Tente novamente.' });
+      console.error('Erro ao criar usuário no Firestore:', error);
+      setCreateUserMessage({ type: 'error', text: 'Erro ao criar usuário. Tente novamente.' });
     } finally {
       setIsCreatingUser(false);
     }
   };
 
-  // Aprovar usuario pendente via Firestore
+  // Aprovar usuário pendente
   const handleApproveUser = async (user: PendingUser) => {
-    if (!confirm(`Aprovar o usuario "${user.name}"?`)) return;
+    if (!confirm(`Aprovar o usuário "${user.name}"?`)) return;
+
+    const payload = {
+      action: 'approve',
+      username: user.username,
+      email: user.email,
+      name: user.name,
+    };
+
     try {
-      const result = await BackendService.approvePendingUser(user.id);
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        redirect: 'follow',
+      });
+
+      const result = await response.json();
+      
       if (result.success) {
-        alert('Usuario aprovado com sucesso!');
+        alert('Usuário aprovado com sucesso!');
         loadPendingUsers();
         loadAllUsers();
       } else {
         alert('Erro: ' + result.message);
       }
-    } catch (error: any) {
-      console.error('Erro ao aprovar:', error);
-      alert('Erro ao aprovar usuario. Tente novamente.');
+    } catch (error) {
+      // Fallback com no-cors
+      try {
+        await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        
+        alert('Usuário aprovado com sucesso!');
+        loadPendingUsers();
+        loadAllUsers();
+      } catch (noCorsError) {
+        alert('Erro ao aprovar usuário. Tente novamente.');
+      }
     }
   };
 
-  // Rejeitar usuario pendente via Firestore
+  // Rejeitar usuário pendente
   const handleRejectUser = async (user: PendingUser) => {
-    const reason = prompt(`Motivo da rejeicao para "${user.name}" (opcional):`);
+    const reason = prompt(`Motivo da rejeição para "${user.name}" (opcional):`);
     if (reason === null) return;
+
+    const payload = {
+      action: 'reject',
+      username: user.username,
+      email: user.email,
+      name: user.name,
+      reason: reason,
+    };
+
     try {
-      const result = await BackendService.rejectPendingUser(user.id, reason || '');
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        redirect: 'follow',
+      });
+
+      const result = await response.json();
+      
       if (result.success) {
-        alert('Usuario rejeitado.');
+        alert('Usuário rejeitado.');
         loadPendingUsers();
       } else {
         alert('Erro: ' + result.message);
       }
-    } catch (error: any) {
-      console.error('Erro ao rejeitar:', error);
-      alert('Erro ao rejeitar usuario. Tente novamente.');
+    } catch (error) {
+      // Fallback com no-cors
+      try {
+        await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        
+        alert('Usuário rejeitado.');
+        loadPendingUsers();
+      } catch (noCorsError) {
+        alert('Erro ao rejeitar usuário. Tente novamente.');
+      }
     }
   };
 

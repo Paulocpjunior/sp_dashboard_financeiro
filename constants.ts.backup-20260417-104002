@@ -1,6 +1,18 @@
-import { Transaction } from './types';
+import { Transaction, User } from './types';
 
 export const DATA_SOURCE: 'sheets' | 'firebase' = 'firebase';
+
+// URL do Apps Script (Fonte de Verdade)
+
+// URLs Alternativas (Fallbacks caso o principal falhe ou seja de outra versão)
+
+// HASHES DE SENHAS CONHECIDAS (SHA-256)
+// Senha: "admin"
+// Senha: "mudar123"
+export const PASS_HASH_MUDAR123 = '1c2a11307611591c9443597405101a052862a931e5f869152b11568285511b8b';
+// Senha: "123456" (Recuperação)
+
+// Usando 'admin' como senha padrão para facilitar
 
 export const BANK_ACCOUNTS = ['Itau', 'Bradesco', 'Santander', 'Caixa', 'Nubank', 'Inter'];
 

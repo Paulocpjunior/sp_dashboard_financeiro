@@ -1,7 +1,22 @@
 import { User } from '../types';
-import { MOCK_USERS, APPS_SCRIPT_URL, ALT_APPS_SCRIPT_URLS } from '../constants';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from './firebaseConfig';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signOut,
+  updateProfile,
+} from 'firebase/auth';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from 'firebase/firestore';
+import { auth, db } from './firebaseConfig';
 
 const AUTH_STORAGE_KEY = 'sp_contabil_auth';
 
@@ -16,124 +31,250 @@ interface LoginResult {
   message?: string;
 }
 
-const MOCK_PASSWORDS: Record<string, string> = {
-  'admin': 'jj123@Mudar',
-  'operador1': 'op1234',
-  'operador2': 'op5678'
-};
+interface RegisterData {
+  name: string;
+  email: string;
+  phone?: string;
+  username: string;
+  password: string;
+}
 
-const sha256 = async (message: string): Promise<string> => {
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-};
+interface RegisterResult {
+  success: boolean;
+  message: string;
+}
 
-const loginViaFirestore = async (username: string, password: string): Promise<LoginResult> => {
+// ===========================================================================
+// Helpers de persistência local (apenas cache do perfil; auth real vive no Firebase)
+// ===========================================================================
+const persistAuth = (user: User): void => {
   try {
-    const usersRef = collection(db, 'users');
-    const snapshot = await getDocs(usersRef);
-    const passwordHash = await sha256(password);
-    
-    for (const doc of snapshot.docs) {
-      const userData = doc.data();
-      const dbUsername = (userData.username || userData.name || '').toLowerCase().trim();
-      const dbEmail = (userData.email || '').toLowerCase().trim();
-      
-      if (dbUsername === username || dbEmail === username) {
-        const dbPassHash = userData.passwordHash || userData.password_hash || '';
-        const dbPassword = userData.password || '';
-        
-        if (dbPassHash === passwordHash || dbPassword === password) {
-          const user: User = {
-            id: doc.id,
-            username: dbUsername,
-            name: userData.name || dbUsername,
-            role: (userData.role || 'operacional').toLowerCase().trim() as any,
-            active: userData.active !== false && userData.isVerified !== false,
-            email: userData.email || '',
-            passwordHash: dbPassHash
-          };
-          
-          if (!user.active) {
-            return { success: false, message: 'Usuário desativado. Contate o administrador.' };
-          }
-          return { success: true, user };
-        }
-      }
-    }
-    return { success: false, message: '' };
-  } catch (error) {
-    console.warn('[AuthService] Firestore auth falhou:', error);
-    return { success: false, message: '' };
+    const authState: AuthState = { user, isAuthenticated: true };
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
+  } catch (e) {
+    console.warn('[AuthService] Falha ao persistir auth:', e);
   }
 };
 
-const loginViaMock = (username: string, password: string): LoginResult => {
-  const mockUser = MOCK_USERS.find(u => u.username === username);
-  if (mockUser && MOCK_PASSWORDS[username] === password) {
-    return { success: true, user: mockUser };
-  }
-  return { success: false, message: '' };
+const clearAuth = (): void => {
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch (e) {}
 };
 
-const loginViaAPI = async (username: string, password: string): Promise<LoginResult> => {
-  const urlsToTry = [APPS_SCRIPT_URL, ...ALT_APPS_SCRIPT_URLS];
-  for (const baseUrl of urlsToTry) {
-    try {
-      const params = new URLSearchParams({ action: 'loginGet', username, password });
-      const url = `${baseUrl}?${params.toString()}`;
-      const response = await fetch(url, { method: 'GET', redirect: 'follow' });
-      if (!response.ok) continue;
-      const text = await response.text();
-      try {
-        const result = JSON.parse(text);
-        if (result && (result.success || result.user)) return result;
-        if (result && result.success === false) return result;
-      } catch (e) { continue; }
-    } catch (error) { continue; }
-  }
-  return { success: false, message: '' };
-};
-
+// ===========================================================================
+// AuthService
+// ===========================================================================
 export const AuthService = {
-  login: async (username: string, password: string): Promise<LoginResult> => {
-    const usernameClean = username.toLowerCase().trim();
-    console.log('[AuthService] Tentando login:', usernameClean);
-    
-    // 1. Mock users
-    const mockResult = loginViaMock(usernameClean, password);
-    if (mockResult.success && mockResult.user) {
-      const authState: AuthState = { user: mockResult.user, isAuthenticated: true };
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
-      console.log('[AuthService] Login via Mock:', mockResult.user.name);
-      return { success: true, user: mockResult.user };
-    }
-    
-    // 2. Firestore
-    const firestoreResult = await loginViaFirestore(usernameClean, password);
-    if (firestoreResult.success && firestoreResult.user) {
-      const user = { ...firestoreResult.user, role: (firestoreResult.user.role || 'operacional').toLowerCase().trim() as any };
-      const authState: AuthState = { user, isAuthenticated: true };
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
-      console.log('[AuthService] Login via Firestore:', user.name, 'Role:', user.role);
+  /**
+   * Login via Firebase Auth.
+   * Parâmetro `emailOrUsername` aceita email (recomendado). Mantido o nome genérico
+   * para compatibilidade com Login.tsx existente.
+   */
+  login: async (emailOrUsername: string, password: string): Promise<LoginResult> => {
+    const email = emailOrUsername.toLowerCase().trim();
+
+    try {
+      // 1. Autentica no Firebase Auth
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const fbUser = cred.user;
+
+      // 2. Verifica se o email foi confirmado
+      if (!fbUser.emailVerified) {
+        await signOut(auth);
+        clearAuth();
+        return {
+          success: false,
+          message: 'Seu email ainda não foi verificado. Cheque sua caixa de entrada (e spam) e clique no link de confirmação.',
+        };
+      }
+
+      // 3. Busca o perfil em users/{uid}
+      const profileRef = doc(db, 'users', fbUser.uid);
+      const profileSnap = await getDoc(profileRef);
+
+      if (!profileSnap.exists()) {
+        await signOut(auth);
+        clearAuth();
+        return {
+          success: false,
+          message: 'Conta criada mas perfil não localizado. Contate o administrador.',
+        };
+      }
+
+      const profileData = profileSnap.data();
+
+      // 4. Verifica se a conta está ativa (foi aprovada pelo admin)
+      if (profileData.active === false) {
+        await signOut(auth);
+        clearAuth();
+        return {
+          success: false,
+          message: 'Sua conta está aguardando aprovação do administrador.',
+        };
+      }
+
+      // 5. Sincroniza emailVerified no Firestore (ex: verificou depois do cadastro)
+      if (profileData.emailVerified !== true) {
+        try {
+          await setDoc(profileRef, { emailVerified: true, lastAccess: new Date().toISOString() }, { merge: true });
+        } catch (e) {
+          console.warn('[AuthService] Falha ao atualizar emailVerified:', e);
+        }
+      } else {
+        try {
+          await setDoc(profileRef, { lastAccess: new Date().toISOString() }, { merge: true });
+        } catch (e) {}
+      }
+
+      // 6. Monta o objeto User usado em todo o sistema
+      const user: User = {
+        id: fbUser.uid,
+        username: (profileData.username || email.split('@')[0] || '').toLowerCase(),
+        name: profileData.name || fbUser.displayName || email,
+        role: ((profileData.role || 'operacional') + '').toLowerCase().trim() as any,
+        active: profileData.active !== false,
+        email: profileData.email || fbUser.email || email,
+        lastAccess: new Date().toISOString(),
+      };
+
+      persistAuth(user);
+      console.log('[AuthService] Login OK:', user.username, 'role:', user.role);
       return { success: true, user };
+    } catch (err: any) {
+      const code = err?.code || '';
+      console.warn('[AuthService] Erro no login:', code, err?.message);
+
+      const messageMap: Record<string, string> = {
+        'auth/invalid-email': 'Email em formato inválido.',
+        'auth/user-not-found': 'Email ou senha incorretos.',
+        'auth/wrong-password': 'Email ou senha incorretos.',
+        'auth/invalid-credential': 'Email ou senha incorretos.',
+        'auth/user-disabled': 'Esta conta foi desativada. Contate o administrador.',
+        'auth/too-many-requests': 'Muitas tentativas falhas. Aguarde alguns minutos e tente novamente.',
+        'auth/network-request-failed': 'Falha de conexão. Verifique sua internet.',
+      };
+
+      return {
+        success: false,
+        message: messageMap[code] || 'Não foi possível fazer login. Tente novamente.',
+      };
     }
-    
-    // 3. Apps Script (legacy)
-    const apiResult = await loginViaAPI(usernameClean, password);
-    if (apiResult.success && apiResult.user) {
-      const user = { ...apiResult.user, role: (apiResult.user.role || 'operacional').toLowerCase().trim() as any };
-      const authState: AuthState = { user, isAuthenticated: true };
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
-      return { success: true, user };
-    }
-    
-    return { success: false, message: firestoreResult.message || apiResult.message || 'Usuário não encontrado ou senha incorreta.' };
   },
 
-  logout: (): void => {
-    try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch (e) {}
+  /**
+   * Registra um novo usuário:
+   * 1. Cria conta no Firebase Auth
+   * 2. Envia email de verificação
+   * 3. Cria doc users/{uid} com active: false (pendente de aprovação admin)
+   */
+  register: async (data: RegisterData): Promise<RegisterResult> => {
+    const email = (data.email || '').toLowerCase().trim();
+    const username = (data.username || '').toLowerCase().trim();
+
+    if (!email || !username || !data.password || !data.name) {
+      return { success: false, message: 'Preencha todos os campos obrigatórios.' };
+    }
+    if (data.password.length < 6) {
+      return { success: false, message: 'A senha deve ter no mínimo 6 caracteres.' };
+    }
+
+    try {
+      // Checa se username já existe no Firestore
+      const usersRef = collection(db, 'users');
+      const qSnap = await getDocs(query(usersRef, where('username', '==', username)));
+      if (!qSnap.empty) {
+        return { success: false, message: 'Este nome de usuário já está em uso.' };
+      }
+
+      // Cria conta no Firebase Auth
+      const cred = await createUserWithEmailAndPassword(auth, email, data.password);
+      const fbUser = cred.user;
+
+      // Nome de exibição no Firebase Auth
+      try {
+        await updateProfile(fbUser, { displayName: data.name });
+      } catch (e) {
+        console.warn('[AuthService] Falha ao definir displayName:', e);
+      }
+
+      // Envia email de verificação
+      try {
+        await sendEmailVerification(fbUser);
+      } catch (e) {
+        console.warn('[AuthService] Falha ao enviar email de verificação:', e);
+      }
+
+      // Cria doc de perfil no Firestore (pendente de aprovação)
+      const profileRef = doc(db, 'users', fbUser.uid);
+      await setDoc(profileRef, {
+        uid: fbUser.uid,
+        email,
+        username,
+        name: data.name,
+        phone: data.phone || '',
+        role: 'operacional',
+        active: false,
+        emailVerified: false,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Faz signOut para o usuário não ficar logado antes de ser aprovado
+      try {
+        await signOut(auth);
+      } catch (e) {}
+
+      return {
+        success: true,
+        message: 'Cadastro realizado! Verifique seu email para confirmar a conta. Após isso, aguarde a aprovação do administrador.',
+      };
+    } catch (err: any) {
+      const code = err?.code || '';
+      console.warn('[AuthService] Erro no registro:', code, err?.message);
+
+      const messageMap: Record<string, string> = {
+        'auth/email-already-in-use': 'Este email já está cadastrado.',
+        'auth/invalid-email': 'Email em formato inválido.',
+        'auth/weak-password': 'Senha muito fraca. Use pelo menos 6 caracteres.',
+        'auth/network-request-failed': 'Falha de conexão. Verifique sua internet.',
+      };
+      return {
+        success: false,
+        message: messageMap[code] || 'Erro ao realizar cadastro. Tente novamente.',
+      };
+    }
+  },
+
+  /**
+   * Envia email de reset de senha via Firebase.
+   */
+  requestPasswordReset: async (email: string): Promise<RegisterResult> => {
+    const cleanEmail = (email || '').toLowerCase().trim();
+    if (!cleanEmail) {
+      return { success: false, message: 'Informe um email válido.' };
+    }
+    try {
+      await sendPasswordResetEmail(auth, cleanEmail);
+      return {
+        success: true,
+        message: 'Email de recuperação enviado! Cheque sua caixa de entrada (e spam).',
+      };
+    } catch (err: any) {
+      const code = err?.code || '';
+      console.warn('[AuthService] Erro no reset de senha:', code, err?.message);
+      // Por segurança, não revelamos se o email existe ou não
+      return {
+        success: true,
+        message: 'Se o email estiver cadastrado, você receberá as instruções em instantes.',
+      };
+    }
+  },
+
+  logout: async (): Promise<void> => {
+    try {
+      await signOut(auth);
+    } catch (e) {}
+    clearAuth();
   },
 
   isAuthenticated: (): boolean => {
@@ -142,7 +283,9 @@ export const AuthService = {
       if (!stored) return false;
       const authState: AuthState = JSON.parse(stored);
       return authState.isAuthenticated && authState.user !== null;
-    } catch (e) { return false; }
+    } catch (e) {
+      return false;
+    }
   },
 
   getCurrentUser: (): User | null => {
@@ -151,13 +294,12 @@ export const AuthService = {
       if (!stored) return null;
       const authState: AuthState = JSON.parse(stored);
       return authState.user;
-    } catch (e) { return null; }
+    } catch (e) {
+      return null;
+    }
   },
 
   updateCurrentUser: (user: User): void => {
-    try {
-      const authState: AuthState = { user, isAuthenticated: true };
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState));
-    } catch (e) {}
+    persistAuth(user);
   },
 };
