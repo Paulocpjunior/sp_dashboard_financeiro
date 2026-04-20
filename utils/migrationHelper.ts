@@ -13,7 +13,11 @@ export const MigrationHelper = {
     
     try {
       // 1. Busca todos os dados do BackendService atual (Google Sheets)
-      const transactions = await BackendService.fetchTransactions();
+      // ⚠️ Sheets desativado — helper indisponível no momento
+      console.warn('[migrationHelper] Sheets desativado. Abortando.');
+      return { success: false, message: 'Sheets desativado. Migração não disponível.' };
+      // @ts-ignore — código preservado para reativação futura
+      const transactions: any[] = [];
       onProgress(10, `Encontradas ${transactions.length} transações na planilha.`);
       
       if (transactions.length === 0) {

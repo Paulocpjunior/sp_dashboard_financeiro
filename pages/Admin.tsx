@@ -347,8 +347,14 @@ const Admin: React.FC = () => {
     setSyncMessage({ type: 'info', text: 'Lendo dados da planilha...' });
 
     try {
-      // 1. Ler todas as transações da planilha
-      const sheetTxs = await BackendService.fetchTransactions();
+      // ⚠️ Sheets desativado — função indisponível no momento.
+      // Se reativar Sheets no futuro, re-adicione BackendService.fetchTransactions().
+      alert('⚠️ Sincronização indisponível: a integração com Google Sheets está desativada neste momento. Os dados são gerenciados diretamente no Firestore.');
+      setIsSyncing(false);
+      setSyncMessage({ type: 'info', text: 'Sheets desativado. Sincronização não disponível.' });
+      return;
+      // @ts-ignore — código preservado para reativação futura
+      const sheetTxs: any[] = [];
       const total = sheetTxs.length;
       setSyncTotal(total);
       setSyncMessage({ type: 'info', text: `${total} registros lidos. Sincronizando com Firebase...` });

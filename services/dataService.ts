@@ -195,7 +195,8 @@ export const DataService = {
     currentLoadPromise = (async () => {
         try {
             console.log("[DataService] Iniciando fetch de transações...");
-            const data = DATA_SOURCE === 'firebase' ? await FirebaseService.fetchTransactions() : await BackendService.fetchTransactions();
+            // DATA_SOURCE sempre 'firebase' (Sheets desativado). Ramo Sheets removido.
+            const data = await FirebaseService.fetchTransactions();
             
             if (!data || !Array.isArray(data)) {
                 throw new Error("Formato de dados inválido recebido do backend.");

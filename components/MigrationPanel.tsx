@@ -25,9 +25,13 @@ export const MigrationPanel: React.FC = () => {
     addLog('Iniciando processo de migração...');
 
     try {
-      addLog('Buscando transações do Google Sheets...');
-      const transactions = await BackendService.fetchTransactions();
-      addLog(`Encontradas ${transactions.length} transações.`);
+      addLog('⚠️ Sheets desativado — migração não disponível no momento.');
+      addLog('Dados são gerenciados diretamente no Firestore.');
+      setStatus('error');
+      setIsMigrating(false);
+      return;
+      // @ts-ignore — código preservado para reativação futura
+      const transactions: any[] = [];
 
       // Grava no Firestore (FirebaseService.migrateFromSheets)
       if (typeof (FirebaseService as any).migrateFromSheets === 'function') {

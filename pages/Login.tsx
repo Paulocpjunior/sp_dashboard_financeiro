@@ -354,7 +354,7 @@ const Login: React.FC = () => {
                       </div>
                       <input
                         type="text"
-                        value={forgotUsername}
+                        value={forgotEmail}
                         onChange={(e) => setForgotEmail(e.target.value)}
                         className="w-full py-3.5 pl-[45px] pr-3.5 border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-[10px] text-[15px] text-slate-800 dark:text-white transition-all focus:outline-none focus:border-royal-600 focus:ring-4 focus:ring-royal-600/10 placeholder:text-slate-400"
                         placeholder="Ex: admin"
