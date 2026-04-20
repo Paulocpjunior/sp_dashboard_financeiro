@@ -3,7 +3,7 @@ import { FilterState } from "../types";
 
 // Note: In a production React app, we usually proxy this through a backend to hide the key.
 // For this standalone demo, we use the env variable directly as requested.
-const apiKey = process.env.API_KEY || '';
+const apiKey = (process.env.API_KEY || process.env.GEMINI_API_KEY || '').trim();
 const ai = new GoogleGenAI({ apiKey });
 
 let lastCallTime = 0;
@@ -43,7 +43,7 @@ export const GeminiService = {
     await waitRateLimit();
 
     try {
-      const modelId = "gemini-3-flash-preview";
+      const modelId = "gemini-2.5-flash";
       const today = new Date();
       const todayStr = today.toISOString().split('T')[0];
       
@@ -169,7 +169,7 @@ export const GeminiService = {
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: query,
         config: { systemInstruction }
       });
@@ -199,7 +199,7 @@ export const GeminiService = {
       `;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         contents: "Gere uma projeção de fluxo de caixa para os próximos 30 dias.",
         config: { systemInstruction }
       });

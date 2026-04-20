@@ -74,8 +74,8 @@ export const FirebaseService = {
         const data = doc.data() as Transaction;
         // Lógica de KPI simplificada baseada no status e movimento
         if (data.status === 'Pago') {
-          totalPaid += data.valuePaid || 0;
-          totalReceived += data.valueReceived || 0;
+          totalPaid += Number(data.valuePaid) || 0;
+          totalReceived += Number(data.valueReceived) || 0;
         }
       });
 

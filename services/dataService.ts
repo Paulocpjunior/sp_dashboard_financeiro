@@ -686,26 +686,30 @@ export const DataService = {
 
     if (isContasAPagar) {
       // KPI Contexto Saída: Total Pago vs Total Pendente
-      const totalGeral = filtered.reduce((acc, curr) => acc + curr.valuePaid, 0);
-      const totalPago = filtered.filter(i => i.status === 'Pago' || (i.status as string) === 'Recebido').reduce((acc, curr) => acc + curr.valuePaid, 0);
+      const totalGeral = filtered.reduce((acc, curr) => acc + (Number(curr.valuePaid) || 0), 0);
+      const totalPago = filtered.filter(i => i.status === 'Pago' || (i.status as string) === 'Recebido').reduce((acc, curr) => acc + (Number(curr.valuePaid) || 0), 0);
       const totalPendente = totalGeral - totalPago;
 
       kpi = { totalPaid: totalPago, totalReceived: totalGeral, balance: totalPendente }; 
     } else if (isContasAReceber) {
       // KPI Contexto Entrada: Total Recebido vs Total Pendente
-      const totalGeralReceber = filtered.reduce((acc, curr) => acc + (curr.totalCobranca || curr.valueReceived || 0), 0);
-      const totalRecebido = filtered.filter(i => i.status === 'Pago' || (i.status as string) === 'Recebido').reduce((acc, curr) => acc + (curr.valueReceived || 0), 0);
+      const totalGeralReceber = filtered.reduce((acc, curr) => acc + (Number(curr.totalCobranca) || Number(curr.valueReceived) || 0), 0);
+      const totalRecebido = filtered.filter(i => i.status === 'Pago' || (i.status as string) === 'Recebido').reduce((acc, curr) => acc + (Number(curr.valueReceived) || 0), 0);
       const saldoReceber = totalGeralReceber - totalRecebido;
 
       kpi = { totalReceived: totalGeralReceber, totalPaid: totalRecebido, balance: saldoReceber };
     } else {
       // KPI Geral (Entradas vs Saídas)
       kpi = filtered.reduce(
-        (acc, curr) => ({
-            totalPaid: acc.totalPaid + curr.valuePaid,
-            totalReceived: acc.totalReceived + curr.valueReceived,
-            balance: acc.balance + (curr.valueReceived - curr.valuePaid),
-        }),
+        (acc, curr) => {
+            const vp = Number(curr.valuePaid) || 0;
+            const vr = Number(curr.valueReceived) || 0;
+            return {
+                totalPaid: acc.totalPaid + vp,
+                totalReceived: acc.totalReceived + vr,
+                balance: acc.balance + (vr - vp),
+            };
+        },
         { totalPaid: 0, totalReceived: 0, balance: 0 }
       );
     }
