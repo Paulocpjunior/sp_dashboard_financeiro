@@ -2,7 +2,6 @@ import { User } from '../types';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  sendEmailVerification,
   sendPasswordResetEmail,
   signOut,
   updateProfile,
@@ -79,17 +78,7 @@ export const AuthService = {
       const cred = await signInWithEmailAndPassword(auth, email, password);
       const fbUser = cred.user;
 
-      // 2. Verifica se o email foi confirmado
-      if (!fbUser.emailVerified) {
-        await signOut(auth);
-        clearAuth();
-        return {
-          success: false,
-          message: 'Seu email ainda não foi verificado. Cheque sua caixa de entrada (e spam) e clique no link de confirmação.',
-        };
-      }
-
-      // 3. Busca o perfil em users/{uid}
+      // 2. Busca o perfil em users/{uid}
       const profileRef = doc(db, 'users', fbUser.uid);
       const profileSnap = await getDoc(profileRef);
 
@@ -114,18 +103,10 @@ export const AuthService = {
         };
       }
 
-      // 5. Sincroniza emailVerified no Firestore (ex: verificou depois do cadastro)
-      if (profileData.emailVerified !== true) {
-        try {
-          await setDoc(profileRef, { emailVerified: true, lastAccess: new Date().toISOString() }, { merge: true });
-        } catch (e) {
-          console.warn('[AuthService] Falha ao atualizar emailVerified:', e);
-        }
-      } else {
-        try {
-          await setDoc(profileRef, { lastAccess: new Date().toISOString() }, { merge: true });
-        } catch (e) {}
-      }
+      // 4. Atualiza lastAccess
+      try {
+        await setDoc(profileRef, { lastAccess: new Date().toISOString() }, { merge: true });
+      } catch (e) {}
 
       // 6. Monta o objeto User usado em todo o sistema
       const user: User = {
@@ -198,13 +179,6 @@ export const AuthService = {
         console.warn('[AuthService] Falha ao definir displayName:', e);
       }
 
-      // Envia email de verificação
-      try {
-        await sendEmailVerification(fbUser);
-      } catch (e) {
-        console.warn('[AuthService] Falha ao enviar email de verificação:', e);
-      }
-
       // Cria doc de perfil no Firestore (pendente de aprovação)
       const profileRef = doc(db, 'users', fbUser.uid);
       await setDoc(profileRef, {
@@ -215,7 +189,6 @@ export const AuthService = {
         phone: data.phone || '',
         role: 'operacional',
         active: false,
-        emailVerified: false,
         createdAt: new Date().toISOString(),
       });
 
@@ -226,7 +199,7 @@ export const AuthService = {
 
       return {
         success: true,
-        message: 'Cadastro realizado! Verifique seu email para confirmar a conta. Após isso, aguarde a aprovação do administrador.',
+        message: 'Cadastro realizado com sucesso! Aguarde a aprovação do administrador para acessar o sistema.',
       };
     } catch (err: any) {
       const code = err?.code || '';

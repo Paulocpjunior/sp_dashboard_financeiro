@@ -1,0 +1,46 @@
+# Dependências
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# Build
+dist/
+dist-ssr/
+build/
+*.local
+
+# Firebase
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+
+# Backups locais (padrão do nosso workflow)
+*.backup-*
+*.backup
+**/*.bak
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+.idea/
+.DS_Store
+
+# Ambiente
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Coverage / testes
+coverage/
+.nyc_output/
+
+# Arquivos Python temporários (scripts /tmp)
+*.pyc
+__pycache__/
