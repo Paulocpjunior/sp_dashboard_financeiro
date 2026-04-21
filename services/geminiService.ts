@@ -3,7 +3,7 @@ import { FilterState } from "../types";
 
 // Note: In a production React app, we usually proxy this through a backend to hide the key.
 // For this standalone demo, we use the env variable directly as requested.
-const apiKey = (process.env.API_KEY || process.env.GEMINI_API_KEY || '').trim();
+const apiKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_API_KEY || '').trim();
 const ai = new GoogleGenAI({ apiKey });
 
 let lastCallTime = 0;
@@ -141,22 +141,38 @@ export const GeminiService = {
     await waitRateLimit();
 
     try {
+      // Normalizador de status: espelha a whitelist de Reports.tsx/dataService
+      const isPago = (s: string): boolean => {
+        const v = (s || '').toLowerCase().trim();
+        return ['sim','recebido','quitado','ok','liquidado','s','pago','paga','recebida','baixado','baixada','quitada','liquidada'].includes(v);
+      };
+      // Valor canonico pra Entrada pendente: totalCobranca > valorOriginal > valueReceived
+      const valorEntradaPendente = (t: any): number =>
+        (Number(t.totalCobranca) > 0 ? Number(t.totalCobranca)
+         : Number(t.valorOriginal) > 0 ? Number(t.valorOriginal)
+         : Number(t.valueReceived) || 0);
+      const hoje = new Date().toISOString().split('T')[0];
+
       const summary = {
-        totalEntradas: transactions.filter(t => t.movement === 'Entrada').reduce((acc, t) => acc + (t.valueReceived || 0), 0),
-        totalSaidas: transactions.filter(t => t.movement === 'Saída').reduce((acc, t) => acc + (t.valuePaid || 0), 0),
-        pendentesReceber: transactions.filter(t => t.movement === 'Entrada' && t.status !== 'Pago').reduce((acc, t) => acc + (t.totalCobranca || 0), 0),
-        pendentesPagar: transactions.filter(t => t.movement === 'Saída' && t.status !== 'Pago').reduce((acc, t) => acc + (t.valuePaid || 0), 0),
-        vencidos: transactions.filter(t => t.status !== 'Pago' && t.dueDate < new Date().toISOString().split('T')[0]).length,
+        totalEntradas: transactions.filter(t => t.movement === 'Entrada' && isPago(t.status)).reduce((acc, t) => acc + (Number(t.valueReceived) || 0), 0),
+        totalSaidas: transactions.filter(t => t.movement === 'Saída' && isPago(t.status)).reduce((acc, t) => acc + (Number(t.valuePaid) || 0), 0),
+        pendentesReceber: transactions.filter(t => t.movement === 'Entrada' && !isPago(t.status)).reduce((acc, t) => acc + valorEntradaPendente(t), 0),
+        pendentesPagar: transactions.filter(t => t.movement === 'Saída' && !isPago(t.status)).reduce((acc, t) => acc + (Number(t.valuePaid) || Number(t.valorOriginal) || 0), 0),
+        vencidos: transactions.filter(t => !isPago(t.status) && t.dueDate && t.dueDate < hoje).length,
         topClientesPendentes: Object.entries(
-          transactions.filter(t => t.movement === 'Entrada' && t.status !== 'Pago')
+          transactions.filter(t => t.movement === 'Entrada' && !isPago(t.status) && t.client)
             .reduce((acc, t) => {
-              acc[t.client] = (acc[t.client] || 0) + (t.totalCobranca || 0);
+              const k = t.client;
+              acc[k] = (acc[k] || 0) + valorEntradaPendente(t);
               return acc;
             }, {} as Record<string, number>)
-        ).sort((a, b) => (b[1] as number) - (a[1] as number)).slice(0, 10),
+        ).filter(([, v]) => (v as number) > 0)
+         .sort((a, b) => (b[1] as number) - (a[1] as number))
+         .slice(0, 10),
         saldoPorBanco: transactions.reduce((acc, t) => {
-          const val = t.movement === 'Entrada' ? (t.valueReceived || 0) : -(t.valuePaid || 0);
-          acc[t.bankAccount] = (acc[t.bankAccount] || 0) + val;
+          const val = t.movement === 'Entrada' ? (Number(t.valueReceived) || 0) : -(Number(t.valuePaid) || 0);
+          const k = t.bankAccount || '(sem banco)';
+          acc[k] = (acc[k] || 0) + val;
           return acc;
         }, {} as Record<string, number>)
       };
