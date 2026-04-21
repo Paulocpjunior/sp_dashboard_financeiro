@@ -209,7 +209,7 @@ const Reports: React.FC = () => {
     if (selectedStatus) {
       const normalizeStatus = (s: string): string => {
         const v = (s || '').toLowerCase().trim();
-        if (['sim', 'recebido', 'quitado', 'ok', 'liquidado', 's', 'pago'].includes(v)) return 'Pago';
+        if (['sim', 'recebido', 'quitado', 'ok', 'liquidado', 's', 'pago', 'paga', 'recebida', 'baixado', 'baixada', 'quitada', 'liquidada'].includes(v)) return 'Pago';
         if (['agendado', 'programado'].includes(v)) return 'Agendado';
         return 'Pendente';
       };
@@ -288,10 +288,19 @@ const Reports: React.FC = () => {
     setFilteredData(result);
 
     // Calculate Detailed KPIs
+    // Helper espelha a normalizeStatus do filtro - necessario para que o KPI respeite o mesmo universo ja filtrado.
+    const normStatusKpi = (s: string): string => {
+      const v = (s || '').toLowerCase().trim();
+      if (['sim','recebido','quitado','ok','liquidado','s','pago','paga','recebida','baixado','baixada','quitada','liquidada'].includes(v)) return 'Pago';
+      if (['agendado','programado'].includes(v)) return 'Agendado';
+      return 'Pendente';
+    };
+
     const newKpi = result.reduce(
       (acc, curr) => {
-        const isPaid = curr.status === 'Pago';
-        const isPending = curr.status === 'Pendente' || curr.status === 'Agendado';
+        const ns = normStatusKpi(curr.status);
+        const isPaid = ns === 'Pago';
+        const isPending = ns === 'Pendente' || ns === 'Agendado';
 
         // Detalhamento Saídas (Contas a Pagar)
         if (curr.movement === 'Saída' || curr.valuePaid > 0) {
@@ -303,8 +312,13 @@ const Reports: React.FC = () => {
         if (curr.movement === 'Entrada' || curr.valueReceived > 0) {
             if (isPaid) acc.settledReceivables += curr.valueReceived;
             if (isPending) {
-                // Se estiver pendente, preferir totalCobranca se existir, senão valueReceived
-                const val = (curr.totalCobranca && curr.totalCobranca > 0) ? curr.totalCobranca : curr.valueReceived;
+                // Ordem canonica (espelha DataTable): totalCobranca > valorOriginal > valueReceived.
+                // Fix critico: valueReceived e 0 em pendentes, entao sem valorOriginal o total ficava ~18% do real.
+                const val = (curr.totalCobranca && curr.totalCobranca > 0)
+                    ? curr.totalCobranca
+                    : (curr.valorOriginal && curr.valorOriginal > 0)
+                        ? curr.valorOriginal
+                        : curr.valueReceived;
                 acc.pendingReceivables += val;
             }
         }

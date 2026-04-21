@@ -531,7 +531,7 @@ export const DataService = {
     if (!isDataLoaded) return [];
     const normalizeStatusVal = (s: string): string => {
       const v = s.toLowerCase().trim();
-      if (["recebido","quitado","sim","ok","liquidado","pago"].includes(v)) return 'Pago';
+      if (["recebido","quitado","sim","ok","liquidado","pago","paga","recebida","baixado","baixada","quitada","liquidada"].includes(v)) return 'Pago';
       if (v === "agendado") return 'Agendado';
       if (["pendente","nao","não","aberto"].includes(v)) return 'Pendente';
       return s.trim();
@@ -651,8 +651,7 @@ export const DataService = {
             // Normaliza aliases: Recebido/Quitado/Sim/OK → Pago
             const normalizeItemStatus = (s: string): string => {
               const v = (s || '').toLowerCase().trim();
-              if (v === 'recebido' || v === 'quitado' || v === 'sim' || v === 'ok' || v === 'liquidado') return 'Pago';
-              if (v === 'pago') return 'Pago';
+              if (['recebido','quitado','sim','ok','liquidado','pago','paga','recebida','baixado','baixada','quitada','liquidada'].includes(v)) return 'Pago';
               if (v === 'agendado') return 'Agendado';
               return 'Pendente';
             };

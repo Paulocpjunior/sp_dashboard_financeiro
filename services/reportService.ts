@@ -187,8 +187,16 @@ export const ReportService = {
         const dataBaixa = formatDate(t.paymentDate);
         const status = safeStr(t.status);
         
-        // Movimentação = Exatamente o que está na Coluna F (t.description)
-        const movimentacaoDesc = safeStr(t.description);
+        // Movimentacao: derivada - so mostra HONORARIOS ou FATURA WIX.
+        // Descriptions legadas (ex: '61-CPD/TI', '1-Outros') sao ignoradas
+        // pois sao ruido de docs CP contaminados ou texto livre sem valor no relatorio.
+        const rawDesc = safeStr((t as any).description).toLowerCase();
+        const descNorm = rawDesc.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const isWix = (t as any).source === 'wix' || descNorm.includes('wix') || descNorm.includes('fatura');
+        const hasHonorarios = Number((t as any).honorarios || 0) > 0 || descNorm.includes('honorar');
+        let movimentacaoDesc = '';
+        if (isWix) movimentacaoDesc = 'FATURA WIX';
+        else if (hasHonorarios) movimentacaoDesc = 'HONORARIOS';
 
         // Observação a Pagar = Cliente / Favorecido
         const observacao = safeStr(t.client);
