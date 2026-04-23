@@ -548,10 +548,12 @@ app.post('/', upload.any(), async (req, res) => {
       const movement    = isContasReceber ? 'Entrada' : 'Saída';
       const clientField = isContasReceber ? 'client' : 'description';
 
+      // v6.0: SO baixa Pendentes. Nunca sobrescreve docs Pagos.
       const matchDocs = await queryFirestore([
         [clientField, movimentacao],
         ['dueDate',   dueDateISO],
         ['movement',  movement],
+        ['status',    'Pendente'],
       ]);
 
       if (matchDocs.length === 0) {
