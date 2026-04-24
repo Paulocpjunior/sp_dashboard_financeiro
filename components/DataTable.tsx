@@ -187,7 +187,10 @@ const DataTable: React.FC<DataTableProps> = ({
 
   // Atualiza o documento de um cliente específico e salva no localStorage
   const handleClientDocChange = (clientName: string, docValue: string) => {
-      const newDocs = { ...clientDocs, [clientName]: docValue };
+      // ★ ETAPA 2 — Normaliza ANTES de salvar: aplica padStart pra CPF/CNPJ e descarta sujeira
+      const cleanInput = cleanDigits(docValue);
+      const valueToStore = cleanInput ? normalizeCpfCnpj(docValue) : docValue;
+      const newDocs = { ...clientDocs, [clientName]: valueToStore };
       setClientDocs(newDocs);
       try {
           localStorage.setItem('boleto_client_docs', JSON.stringify(newDocs));
@@ -450,24 +453,52 @@ const DataTable: React.FC<DataTableProps> = ({
 
     // 4. Função Final de Exportação (Gera CSV)
     const handleGenerateCSV = () => {
-      // Validação Final: Verificar se há documentos inválidos
-      const invalidClients = selectedExportClients.filter(client => {
-          const status = validationStatus[client]?.status;
-          const doc = clientDocs[client] || '';
-          return status === 'invalid' || !doc;
-      });
+      // ★ ETAPA 2 — Guard sincrono: BLOQUEIA a exportacao se algum cliente tem CPF/CNPJ invalido.
+      // Verifica cada cliente selecionado, normalizando e validando DV (CPF 11 / CNPJ 14).
+      const sourceDataForCheck = (allData && allData.length > 0) ? allData : data;
+      const invalidReport: { client: string; reason: string; raw: string }[] = [];
 
-      if (invalidClients.length > 0) {
-          const msg = `Atenção: Existem ${invalidClients.length} clientes com documentos inválidos ou vazios.\n\n` +
-                      `Exemplos: ${invalidClients.slice(0, 3).join(', ')}...\n\n` +
-                      `O arquivo pode ser rejeitado pelo banco. Deseja gerar mesmo assim?`;
-          if (!confirm(msg)) return;
+      for (const clientName of selectedExportClients) {
+          // Pega documento prioritariamente do modal (localStorage), fallback pro Firestore (row.cpfCnpj)
+          const row = sourceDataForCheck.find(r => r.client === clientName);
+          const raw = clientDocs[clientName] || row?.cpfCnpj || '';
+          const clean = cleanDigits(raw);
+          const normalized = normalizeCpfCnpj(raw);
+
+          if (!clean) {
+              invalidReport.push({ client: clientName, reason: 'SEM DOCUMENTO', raw: '(vazio)' });
+              continue;
+          }
+          if (normalized.length === 11) {
+              if (!validateCPF(normalized)) {
+                  invalidReport.push({ client: clientName, reason: 'CPF com dígito verificador inválido', raw });
+              }
+          } else if (normalized.length === 14) {
+              if (!validateCNPJ(normalized)) {
+                  invalidReport.push({ client: clientName, reason: 'CNPJ com dígito verificador inválido', raw });
+              }
+          } else {
+              invalidReport.push({ client: clientName, reason: `Tamanho inválido (${normalized.length} dígitos — esperado 11 para CPF ou 14 para CNPJ)`, raw });
+          }
+      }
+
+      if (invalidReport.length > 0) {
+          const lista = invalidReport.slice(0, 15)
+              .map(i => `  • ${i.client} — ${i.reason} [${i.raw}]`)
+              .join('\n');
+          const extra = invalidReport.length > 15 ? `\n  ...e mais ${invalidReport.length - 15} clientes.` : '';
+          alert(
+              `❌ Exportação bloqueada — ${invalidReport.length} cliente(s) com CPF/CNPJ inválido:\n\n` +
+              lista + extra +
+              `\n\nCorrija os documentos na lista do modal e tente novamente.\n` +
+              `Nenhum arquivo foi gerado.`
+          );
+          return;
       }
 
       if (!exportToken) {
-          if (!confirm('O Token da Conta Bancária está vazio. O arquivo pode ser rejeitado. Deseja continuar mesmo assim?')) {
-              return;
-          }
+          alert('❌ Exportação bloqueada — Token da Conta Bancária está vazio.\n\nPreencha o token no modal e tente novamente.');
+          return;
       }
 
       // Filtrar dados baseados nos clientes selecionados e no filtro atual (allData)
