@@ -304,7 +304,7 @@ function extractContasReceber(raw) {
   const honorariosRaw = findRawField(raw, 'honorar', 'honora');
   const extrasRaw     = findRawField(raw, 'valorextra', 'extras', 'valorExtra');
   const nClienteRaw   = findRawField(raw, 'ncliente', 'nclient', 'codigoempresa', 'codigocliente', 'clientenum');
-  const cnpjRaw       = findRawField(raw, 'cnpj', 'cpfcnpj', 'cpf_cnpj');
+  const cnpjRaw       = findRawField(raw, 'cnpj', 'cpfcnpj', 'cpf_cnpj', 'cpf');
   const metodoRaw     = findRawField(raw, 'metodopag', 'metodoenv', 'recebivelmetodo', 'recebivel');
   const obsRaw        = findRawField(raw, 'observac', 'obs_');
   const cobrancaExtra = findRawField(raw, 'cobrancaextra', 'cobextra', 'cobrancas');
