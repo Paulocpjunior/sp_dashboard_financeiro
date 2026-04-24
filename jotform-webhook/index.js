@@ -321,7 +321,7 @@ function extractContasReceber(raw) {
     dataReceb,
     honorarios: parseValor(honorariosRaw),
     extras:     parseValor(extrasRaw),
-    nCliente:   nClienteRaw ? String(nClienteRaw).trim() : '',
+    nCliente:   nClienteRaw ? (parseInt(String(nClienteRaw).trim().replace(/\D/g,''),10) || String(nClienteRaw).trim()) : '',
     cnpj:       cnpjRaw     ? String(cnpjRaw).trim()    : '',
     metodo:     metodoRaw   ? String(metodoRaw).trim()  : '',
     obs:        obsRaw      ? String(obsRaw).trim()     : '',
