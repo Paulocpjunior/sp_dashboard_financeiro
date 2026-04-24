@@ -28,6 +28,20 @@ type SortDirection = 'asc' | 'desc';
 
 const cleanDigits = (value: string) => value.replace(/\D/g, '');
 
+// Normaliza CPF/CNPJ aplicando zero-padding a esquerda.
+// Corrige caso classico de digitos perdidos quando o documento foi
+// tratado como numero (Google Sheets/Excel/JSON legado).
+//  - 9 a 11 digitos  -> CPF, padStart(11,'0')
+//  - 12 a 14 digitos -> CNPJ, padStart(14,'0')
+//  - fora dessas faixas: retorna os digitos crus (sera capturado pela validacao).
+const normalizeCpfCnpj = (value: string): string => {
+    const clean = cleanDigits(value);
+    if (!clean) return '';
+    if (clean.length >= 9 && clean.length <= 11) return clean.padStart(11, '0');
+    if (clean.length >= 12 && clean.length <= 14) return clean.padStart(14, '0');
+    return clean;
+};
+
 const validateCPF = (cpf: string): boolean => {
   const clean = cleanDigits(cpf);
   if (clean.length !== 11) return false;
@@ -537,7 +551,7 @@ const DataTable: React.FC<DataTableProps> = ({
         
         // USA O DOCUMENTO DEFINIDO NO PASSO 2 (ou extraído/cacheado)
         // Se estiver vazio no input, tenta usar o da planilha diretamente
-        const cpfCnpj = cleanDigits(clientDocs[row.client] || row.cpfCnpj || '');
+        const cpfCnpj = normalizeCpfCnpj(clientDocs[row.client] || row.cpfCnpj || '');
 
         // Mapeamento para as 19 colunas esperadas
         return [
