@@ -5,10 +5,12 @@ import Dashboard from './pages/Dashboard';
 import Reports from './pages/Reports';
 import Admin from './pages/Admin';
 import ProtectedRoute from './components/ProtectedRoute';
+import UpdateBanner from './components/UpdateBanner';
 
 const App: React.FC = () => {
   return (
     <Router>
+      <UpdateBanner />
       <Routes>
         <Route path="/login" element={<Login />} />
         

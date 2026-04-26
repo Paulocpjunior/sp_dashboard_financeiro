@@ -739,16 +739,20 @@ export const DataService = {
     ];
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(';')]
-        .concat(result.data.map(row => [
-              row.id, row.date, row.dueDate, row.paymentDate || '', row.bankAccount, row.type, row.status,
-              `"${row.client}"`, `"${row.cpfCnpj || ''}"`, row.movement,
-              row.valuePaid.toFixed(2).replace('.', ','),
-              row.valueReceived.toFixed(2).replace('.', ','),
-              (row.honorarios || 0).toFixed(2).replace('.', ','),
-              (row.valorExtra || 0).toFixed(2).replace('.', ','),
-              (row.totalCobranca || 0).toFixed(2).replace('.', ','),
-              `"${(row.observacaoAPagar || '').replace(/"/g, '""')}"`
-            ].join(';')
+        .concat(result.data.map(row => {
+              const extraVal = row.valorExtra ?? row.extras ?? 0;
+              const totalCob = row.totalCobranca ?? row.valorOriginal ?? ((row.honorarios || 0) + extraVal);
+              return [
+                row.id, row.date, row.dueDate, row.paymentDate || '', row.bankAccount, row.type, row.status,
+                `"${row.client}"`, `"${row.cpfCnpj || ''}"`, row.movement,
+                row.valuePaid.toFixed(2).replace('.', ','),
+                row.valueReceived.toFixed(2).replace('.', ','),
+                (row.honorarios || 0).toFixed(2).replace('.', ','),
+                extraVal.toFixed(2).replace('.', ','),
+                totalCob.toFixed(2).replace('.', ','),
+                `"${(row.observacaoAPagar || '').replace(/"/g, '""')}"`
+              ].join(';');
+            }
         )).join('\n');
 
     const encodedUri = encodeURI(csvContent);

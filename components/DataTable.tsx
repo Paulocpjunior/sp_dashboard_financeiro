@@ -563,7 +563,12 @@ const DataTable: React.FC<DataTableProps> = ({
     };
 
     const rows = dataToExport.map(row => {
-        const valor = formatValueCSV(row.totalCobranca || row.honorarios);
+        const extraVal = row.valorExtra ?? row.extras ?? 0;
+        // VALOR do boleto = total a cobrar do cliente (honorário + extras).
+        // Cascata: totalCobranca (Apps Script) > valorOriginal (webhook) > honorarios+extras.
+        const valor = formatValueCSV(
+          row.totalCobranca || row.valorOriginal || ((row.honorarios || 0) + extraVal)
+        );
         const vencimento = formatDateCSV(row.dueDate);
 
         // ★ CORREÇÃO CRÍTICA: NOSSO_NUMERO = N.Cliente do cliente
@@ -1055,7 +1060,7 @@ const DataTable: React.FC<DataTableProps> = ({
                             {formatCurrency(row.honorarios)}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-right text-slate-600 dark:text-slate-400">
-                            {formatCurrency(row.valorExtra)}
+                            {formatCurrency(row.valorExtra ?? row.extras ?? 0)}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap text-right text-blue-600 dark:text-blue-400 font-semibold">
                             {formatCurrency(row.totalCobranca || row.valorOriginal)}

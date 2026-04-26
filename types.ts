@@ -28,6 +28,7 @@ export interface Transaction {
   // Campos específicos para 'Entrada de Caixa / Contas a Receber'
   honorarios?: number;
   valorExtra?: number;
+  extras?: number; // Legado: webhook grava o valor extra como "extras"; frontend deve aceitar ambos
   totalCobranca?: number;
   paymentMethod?: string;
   cpfCnpj?: string; // Novo campo vindo do Jotform/Planilha
