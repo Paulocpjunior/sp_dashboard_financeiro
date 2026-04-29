@@ -297,6 +297,7 @@ function extractContasReceber(raw) {
   const nomeEmpresa  = (raw.q169_nomeEmpresa || '').toString().trim();
   const docPago      = (raw.q314_docpago314  || '').toString().toUpperCase().trim();
   const valorRecebido = raw.q252_valorRecebido || raw.q279_totalCobranca279 || '';
+  const dataLanc     = parseJotformDate(raw.q6_dataLancamento6);
   const dataVenc     = parseJotformDate(raw.q262_dataVencimentoreceber);
   const dataReceb    = parseJotformDate(raw.q263_dataRecebimento);
 
@@ -317,6 +318,7 @@ function extractContasReceber(raw) {
     nomeEmpresa,
     docPago,
     valorRecebido,
+    dataLanc,
     dataVenc,
     dataReceb,
     honorarios: parseValor(honorariosRaw),
@@ -327,6 +329,7 @@ function extractContasReceber(raw) {
     obs:        obsRaw      ? String(obsRaw).trim()     : '',
     cobrancaExtra: cobrancaExtra ? String(cobrancaExtra).trim() : '',
     valorNum:   parseValor(valorRecebido),
+    dataLancISO: toBrDate(dataLanc),
     dueDateISO: toBrDate(dataVenc),
     dataPgto:   dataReceb || dataVenc || new Date().toLocaleDateString('pt-BR'),
   };
@@ -336,6 +339,7 @@ function extractContasPagar(raw) {
   const movimentacao = (raw.q44_movimentacao44 || '').toString().trim();
   const docPago      = (raw.q291_docpago       || '').toString().toUpperCase().trim();
   const valorRef     = raw.q56_valorRefvalor56  || raw.q57_valorPago || '';
+  const dataLanc     = parseJotformDate(raw.q15_dataLancamento || raw.q167_dataLancamento167);
   const dataAPagar   = parseJotformDate(raw.q313_dataA);
   const dataBaixa    = parseJotformDate(raw.q129_dataBaixa);
 
@@ -346,11 +350,13 @@ function extractContasPagar(raw) {
     movimentacao,
     docPago,
     valorRef,
+    dataLanc,
     dataAPagar,
     dataBaixa,
     obs:       obsRaw    ? String(obsRaw).trim()    : '',
     metodo:    metodoRaw ? String(metodoRaw).trim() : '',
     valorNum:  parseValor(valorRef),
+    dataLancISO: toBrDate(dataLanc),
     dueDateISO: toBrDate(dataAPagar),
     dataPgto:  dataBaixa || dataAPagar || new Date().toLocaleDateString('pt-BR'),
   };
@@ -369,7 +375,7 @@ function buildContasReceberFields(cr, submissionId) {
     client:        cr.nomeEmpresa,
     description:   cr.nomeEmpresa,
     dueDate:       cr.dueDateISO,
-    date:          cr.dueDateISO,
+    date:          cr.dataLancISO || cr.dueDateISO,
     paymentDate:   isPago ? toBrDate(cr.dataPgto) : '',
     dataPagamento: isPago ? cr.dataPgto : '',
     valorOriginal: cr.valorNum,
@@ -403,7 +409,7 @@ function buildContasPagarFields(cp, submissionId) {
     description:   cp.movimentacao,
     client:        cp.movimentacao,
     dueDate:       cp.dueDateISO,
-    date:          cp.dueDateISO,
+    date:          cp.dataLancISO || cp.dueDateISO,
     paymentDate:   isPago ? toBrDate(cp.dataPgto) : '',
     dataPagamento: isPago ? cp.dataPgto : '',
     valorOriginal: cp.valorNum,
@@ -499,6 +505,49 @@ app.post('/', upload.any(), async (req, res) => {
 
         await firestorePatch(docId, updateFields);
         console.log(`UPDATE OK: ${docId} (submissionId: ${submissionId})`);
+
+        // ──────────────────────────────────────────────────────────────────
+        // v6.1: AUTO-LIMPEZA DE ÓRFÃOS LEGADOS DO ERA-SHEET
+        // Após PATCH para Pago, varre Pendentes órfãos (sem submissionId E
+        // sem source) com mesmo description+dueDate+movement=Saída e deleta.
+        // São duplicatas vindas do AutoSyncFirebase.gs que nunca foram baixadas
+        // porque o webhook não tinha como casar com elas (sem submissionId).
+        // Só roda em Contas a Pagar com Doc.Pago=SIM.
+        // ──────────────────────────────────────────────────────────────────
+        if (!isContasReceber) {
+          try {
+            const cpCheck = extractContasPagar(raw);
+            if (cpCheck.docPago === 'SIM' && cpCheck.movimentacao && cpCheck.dueDateISO) {
+              const orfaos = await queryFirestore([
+                ['description', cpCheck.movimentacao],
+                ['dueDate',     cpCheck.dueDateISO],
+                ['movement',    'Saída'],
+                ['status',      'Pendente'],
+              ]);
+              let cleaned = 0;
+              for (const o of (orfaos || [])) {
+                const of = (o.document && o.document.fields) || {};
+                // Só deleta órfão LEGADO: SEM submissionId E SEM source
+                if (!of.submissionId && !of.source) {
+                  const orfaoId = o.document.name.split('/').pop();
+                  if (orfaoId !== docId) {
+                    try {
+                      await firestoreDelete(orfaoId);
+                      cleaned++;
+                      console.log(`v6.1 ÓRFÃO LIMPO: ${orfaoId} (par de ${docId})`);
+                    } catch (e) {
+                      console.error(`v6.1 falha ao deletar órfão ${orfaoId}: ${e.message}`);
+                    }
+                  }
+                }
+              }
+              if (cleaned === 0) console.log('v6.1 nenhum órfão encontrado (ok)');
+            }
+          } catch (e) {
+            console.error(`v6.1 erro na varredura de órfãos: ${e.message}`);
+          }
+        }
+
         return res.status(200).json({
           status: 'entry_updated',
           docId,
@@ -612,7 +661,7 @@ app.post('/', upload.any(), async (req, res) => {
         pago:          'Não',
         client:        movimentacao,
         description:   movimentacao,
-        date:          dateISO,
+        date:          cr.dataLancISO || dateISO,
         dueDate:       dueDateISO || dateISO,
         paymentDate:   '',
         dataPagamento: '',
@@ -645,7 +694,7 @@ app.post('/', upload.any(), async (req, res) => {
         pago:          isPagoCP ? 'Pago' : 'Não',
         description:   movimentacao,
         client:        movimentacao,
-        date:          dateISO,
+        date:          cp.dataLancISO || dateISO,
         dueDate:       dueDateISO || dateISO,
         paymentDate:   isPagoCP ? toBrDate(dataPgto) : '',
         dataPagamento: isPagoCP ? dataPgto : '',
