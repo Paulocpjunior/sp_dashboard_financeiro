@@ -507,44 +507,56 @@ app.post('/', upload.any(), async (req, res) => {
         console.log(`UPDATE OK: ${docId} (submissionId: ${submissionId})`);
 
         // ──────────────────────────────────────────────────────────────────
-        // v6.1: AUTO-LIMPEZA DE ÓRFÃOS LEGADOS DO ERA-SHEET
-        // Após PATCH para Pago, varre Pendentes órfãos (sem submissionId E
-        // sem source) com mesmo description+dueDate+movement=Saída e deleta.
-        // São duplicatas vindas do AutoSyncFirebase.gs que nunca foram baixadas
-        // porque o webhook não tinha como casar com elas (sem submissionId).
-        // Só roda em Contas a Pagar com Doc.Pago=SIM.
+        // v6.2: AUTO-LIMPEZA DE ÓRFÃOS LEGADOS — RESTRITIVA POR VALOR
+        // Após PATCH (qualquer status), varre órfãos (sem submissionId E sem
+        // source) com mesmo description+dueDate+movement="Saída" E mesmo
+        // valuePaid (±0,01). Só roda em Contas a Pagar.
+        // Restrição por valor protege descrições genéricas que agregam
+        // múltiplos lançamentos legítimos (Vale Transporte, Impostos, etc).
         // ──────────────────────────────────────────────────────────────────
         if (!isContasReceber) {
           try {
             const cpCheck = extractContasPagar(raw);
-            if (cpCheck.docPago === 'SIM' && cpCheck.movimentacao && cpCheck.dueDateISO) {
+            if (cpCheck.movimentacao && cpCheck.dueDateISO && Number.isFinite(cpCheck.valorNum)) {
               const orfaos = await queryFirestore([
                 ['description', cpCheck.movimentacao],
                 ['dueDate',     cpCheck.dueDateISO],
                 ['movement',    'Saída'],
-                ['status',      'Pendente'],
               ]);
-              let cleaned = 0;
+              let cleaned = 0; let skippedValue = 0;
               for (const o of (orfaos || [])) {
                 const of = (o.document && o.document.fields) || {};
                 // Só deleta órfão LEGADO: SEM submissionId E SEM source
-                if (!of.submissionId && !of.source) {
-                  const orfaoId = o.document.name.split('/').pop();
-                  if (orfaoId !== docId) {
-                    try {
-                      await firestoreDelete(orfaoId);
-                      cleaned++;
-                      console.log(`v6.1 ÓRFÃO LIMPO: ${orfaoId} (par de ${docId})`);
-                    } catch (e) {
-                      console.error(`v6.1 falha ao deletar órfão ${orfaoId}: ${e.message}`);
-                    }
-                  }
+                if (of.submissionId || of.source) continue;
+                const orfaoId = o.document.name.split('/').pop();
+                if (orfaoId === docId) continue;
+                // Match por valor ±0,01
+                const vp = of.valuePaid;
+                let v = NaN;
+                if (vp) {
+                  v = vp.doubleValue != null ? Number(vp.doubleValue)
+                    : vp.integerValue != null ? Number(vp.integerValue)
+                    : vp.stringValue != null ? Number(String(vp.stringValue).replace(',', '.'))
+                    : NaN;
+                }
+                if (!Number.isFinite(v) || Math.abs(v - cpCheck.valorNum) > 0.01) {
+                  skippedValue++;
+                  console.log(`v6.2 SKIP por valor: órfão ${orfaoId} vp=${v} != ${cpCheck.valorNum}`);
+                  continue;
+                }
+                try {
+                  await firestoreDelete(orfaoId);
+                  cleaned++;
+                  console.log(`v6.2 ÓRFÃO LIMPO: ${orfaoId} (par de ${docId}, valor ${cpCheck.valorNum})`);
+                } catch (e) {
+                  console.error(`v6.2 falha ao deletar órfão ${orfaoId}: ${e.message}`);
                 }
               }
-              if (cleaned === 0) console.log('v6.1 nenhum órfão encontrado (ok)');
+              if (cleaned === 0 && skippedValue === 0) console.log('v6.2 nenhum órfão encontrado (ok)');
+              else console.log(`v6.2 resumo: ${cleaned} limpos, ${skippedValue} preservados por valor diferente`);
             }
           } catch (e) {
-            console.error(`v6.1 erro na varredura de órfãos: ${e.message}`);
+            console.error(`v6.2 erro na varredura de órfãos: ${e.message}`);
           }
         }
 
