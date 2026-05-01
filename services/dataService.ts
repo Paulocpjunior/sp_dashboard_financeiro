@@ -210,6 +210,10 @@ export const DataService = {
                 if (excludedIds.includes(t.id)) {
                   t.isExcluded = true;
                 }
+                // v-dedupe: esconder docs marcados como duplicatas forense
+                if ((t as any)._dedupe) {
+                  t.isExcluded = true;
+                }
                 // ★ Normalizar status: "Sim", "Recebido", "Quitado", "OK", "Liquidado" → "Pago"
                 if (t.status != null) {
                   const sLower = String(t.status).toLowerCase().trim();

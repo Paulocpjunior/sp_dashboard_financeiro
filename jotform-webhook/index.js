@@ -239,6 +239,25 @@ async function queryBySubmissionId(submissionId, fallback) {
     // v5.7: match unico = seguro. Ambiguo (2+) = criar novo doc (seguro).
     if (matches.length === 1) { console.log(`Fallback Pagar match UNICO → doc ${matches[0].document.name.split('/').pop()}`); return matches; }
     if (matches.length > 1) { console.log(`Fallback Pagar AMBIGUO: ${matches.length} matches — criara novo doc`); return null; }
+
+    // v6.3 FIX B: busca RELAXADA (sem valuePaid) — recupera edicao que so mudou o valor.
+    // So aplica se busca estrita acima nao achou nada (matches.length === 0).
+    const relaxados = all.filter(d => {
+      const ff = d.document.fields || {};
+      const st = ff.status && ff.status.stringValue;
+      if (st !== 'Pendente') return false;
+      const ded = ff._dedupe && ff._dedupe.booleanValue;
+      if (ded === true) return false;
+      return true;
+    });
+    if (relaxados.length === 1) {
+      console.log(`v6.3 Fallback Pagar RELAXADO match UNICO → doc ${relaxados[0].document.name.split('/').pop()} (valor ignorado)`);
+      return relaxados;
+    }
+    if (relaxados.length > 1) {
+      console.log(`v6.3 Fallback Pagar RELAXADO AMBIGUO: ${relaxados.length} matches — criara novo doc`);
+      return null;
+    }
   }
 
   return null;
@@ -610,12 +629,26 @@ app.post('/', upload.any(), async (req, res) => {
       const clientField = isContasReceber ? 'client' : 'description';
 
       // v6.0: SO baixa Pendentes. Nunca sobrescreve docs Pagos.
-      const matchDocs = await queryFirestore([
+      // v6.3 FIX A: filtra tambem por valuePaid (±0,01) — impede baixar doc de OUTRO lancamento
+      // que compartilha description+dueDate (ex: VT/VR de funcionarios diferentes).
+      const matchDocsRaw = await queryFirestore([
         [clientField, movimentacao],
         ['dueDate',   dueDateISO],
         ['movement',  movement],
         ['status',    'Pendente'],
       ]);
+      const matchDocs = matchDocsRaw.filter(d => {
+        const ff = (d.document && d.document.fields) || {};
+        const vp = ff.valuePaid;
+        if (!vp) return false;
+        const v = vp.doubleValue != null ? Number(vp.doubleValue)
+                : vp.integerValue != null ? Number(vp.integerValue)
+                : vp.stringValue != null ? Number(String(vp.stringValue).replace(',', '.'))
+                : NaN;
+        const ok = Number.isFinite(v) && Math.abs(v - Number(valorNum)) < 0.01;
+        if (!ok) console.log(`v6.3 CAMINHO 2 SKIP por valor: ${d.document.name.split('/').pop()} vp=${v} != ${valorNum}`);
+        return ok;
+      });
 
       if (matchDocs.length === 0) {
         // v5.9: ao inves de 404, cai para CAMINHO 3 e cria doc novo ja como Pago.
@@ -734,7 +767,7 @@ app.post('/', upload.any(), async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '5.10-fix-generateDocId' }));
+app.get('/', (req, res) => res.json({ status: 'jotform-webhook online', version: '6.3-caminho2-valor + fallback-relaxado' }));
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log(`Webhook rodando na porta ${PORT}`));
